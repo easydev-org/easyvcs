@@ -1,0 +1,682 @@
+// Package server is the authoritative EasyVCS server: the change-native
+// collaboration and content surface, expressed as a reusable library so it can
+// be embedded or run as a standalone binary (see cmd/server). Every route lives
+// under the /api/v1 prefix; the smart protocol is:
+//
+//	POST /api/v1/repos/{ns}/{name}/advertise   (read: repo read ACL)
+//	POST /api/v1/repos/{ns}/{name}/fetch       (read: repo read ACL)
+//	POST /api/v1/repos/{ns}/{name}/push        (write: repo ACL, non-fast-forward)
+//
+// The hosting surface (identity, orgs/repos, refs, browse) is in hosting.go and
+// Revision Requests in rr.go; see docs/api.md for the full endpoint list.
+//
+// Authentication uses bearer tokens resolved against the store's users/tokens
+// tables (store.LookupToken). Access is enforced per repository (owner /
+// maintainer / developer, see store.RoleOf). A write operation is recorded in
+// the append-only audit_log when an AuditSink is configured.
+//
+// When no users/tokens are registered the instance is treated as open (CLI
+// default) and anonymous read/write is allowed.
+package server
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/easylab-platform/easyvcs/object"
+	"github.com/easylab-platform/easyvcs/store"
+	"github.com/easylab-platform/easyvcs/transfer"
+)
+
+// AdvertiseReq/Resp mirror the CLI's smart protocol request/response.
+type AdvertiseReq struct {
+	Have        []string `json:"have"`
+	HaveObjects []string `json:"have_objects"`
+	WantChanges []string `json:"want_changes,omitempty"`
+}
+
+type AdvertiseResp struct {
+	Repo    string       `json:"repo"`
+	Changes []string     `json:"changes"`
+	Refs    []*store.Ref `json:"refs"`
+	// ChangeHashes maps each advertised revision id to its CURRENT snapshot
+	// hash (hex). A push client uses it to decide which revisions the server
+	// already holds *at the same content*: because rewriting (rebase / amend /
+	// squash) keeps the revision id stable and changes only the snapshot, an
+	// id-only comparison would wrongly skip a rewritten revision and silently
+	// drop its new snapshot. Omitted (nil) by older servers, in which case a
+	// client falls back to id-only skipping.
+	ChangeHashes map[string]string `json:"change_hashes,omitempty"`
+}
+
+// AuditSink receives an AuditEvent for access attempts. The default sink writes
+// to the store's append-only audit_log table; tests can supply a mock.
+type AuditSink interface {
+	Record(store.AuditEvent)
+}
+
+// Server is the VCS protocol handler. It resolves bearer tokens against the
+// central store on every request and enforces repository/branch ACLs.
+type Server struct {
+	cs    *store.CentralStore
+	audit AuditSink
+	// repoLocks is the per-repository write lock. On SQLite it is an
+	// in-process map of mutexes (single instance); on Postgres it is a
+	// cross-replica advisory lock so two server instances serialise writes to
+	// the same repository (see repoLocker).
+	repoLocks repoLocker
+	// maxBody bounds request bodies (http.MaxBytesReader); 0 uses the default.
+	maxBody int64
+}
+
+// DefaultMaxBody is the default request body limit (512 MiB).
+const DefaultMaxBody = 512 << 20
+
+// New builds a Server over the given central store. If sink is nil a default
+// store-backed sink is used (writing audit_log). The tokens parameter is gone:
+// tokens are resolved via store.LookupToken on each request.
+func New(cs *store.CentralStore, sink AuditSink) *Server {
+	if sink == nil {
+		sink = &storeAuditSink{cs: cs}
+	}
+	return &Server{cs: cs, audit: sink, repoLocks: newRepoLocker(cs), maxBody: DefaultMaxBody}
+}
+
+// SetMaxBody overrides the request body limit (bytes). Values <= 0 restore the
+// default.
+func (s *Server) SetMaxBody(n int64) {
+	if n <= 0 {
+		n = DefaultMaxBody
+	}
+	s.maxBody = n
+}
+
+// Handler returns the HTTP router for this server. It may be mounted directly
+// (e.g. http.Server{Handler: s.Handler()} or embedded in a larger mux).
+func (s *Server) Handler() http.Handler {
+	return s.router()
+}
+
+// Router returns the *http.ServeMux (same as Handler but typed).
+func (s *Server) Router() *http.ServeMux { return s.router() }
+
+// storeAuditSink records AuditEvents into the store's audit_log table.
+type storeAuditSink struct{ cs *store.CentralStore }
+
+func (s *storeAuditSink) Record(ev store.AuditEvent) {
+	if err := s.cs.RecordAudit(ev); err != nil {
+		// Audit is append-only diagnostics; a write failure must not break the
+		// request, but it must not be invisible either.
+		log.Printf("easyvcs-server: audit write failed: %v", err)
+	}
+}
+
+// auditDenied and auditOK are helpers that build an AuditEvent for the current
+// request with the standard fields, so handler code stays one line.
+func (s *Server) auditDenied(r *http.Request, tk *store.Token, detail string) {
+	ev := auditEvent(r, tk)
+	ev.Outcome = outcomeDenied
+	ev.Detail = detail
+	s.audit.Record(ev)
+}
+
+func (s *Server) auditOK(r *http.Request, tk *store.Token, detail string) {
+	ev := auditEvent(r, tk)
+	ev.Outcome = outcomeOK
+	ev.Detail = detail
+	s.audit.Record(ev)
+}
+
+// outcome constants for audit events.
+const (
+	outcomeDenied = "denied"
+	outcomeOK     = "ok"
+)
+
+// auditEvent captures the common fields of an audit record from a request.
+func auditEvent(r *http.Request, tk *store.Token) store.AuditEvent {
+	return store.AuditEvent{
+		Timestamp: time.Now().UTC().UnixMilli(),
+		Action:    actionName(r),
+		Namespace: r.PathValue("ns"),
+		Repo:      r.PathValue("name"),
+		UserID:    userID(tk),
+		IP:        remoteIP(r),
+	}
+}
+
+// authenticate resolves the request's bearer token to a user. It returns the
+// token-level record (with UserID) and true when the request may proceed to
+// authorization: an absent credential is ANONYMOUS (token=nil, ok=true) and is
+// authorized separately (read on a public repo; never a write). A malformed or
+// unknown token is rejected outright.
+func (s *Server) authenticate(r *http.Request) (*store.Token, bool) {
+	header := r.Header.Get("Authorization")
+	raw := ""
+	if strings.HasPrefix(header, "Bearer ") {
+		raw = strings.TrimPrefix(header, "Bearer ")
+	}
+	// The git CLI sends Basic auth (any username, the token as password) for
+	// `git clone http://user:token@host/...`; accept that shape too so the same
+	// token authenticates both the REST API and git smart HTTP.
+	if raw == "" && strings.HasPrefix(header, "Basic ") {
+		if dec, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(header, "Basic ")); err == nil {
+			if _, pass, ok := strings.Cut(string(dec), ":"); ok {
+				raw = pass
+			}
+		}
+	}
+	if raw == "" {
+		return nil, true // anonymous; authorization decides
+	}
+	tk, err := s.cs.LookupToken(raw)
+	if err != nil {
+		return nil, false
+	}
+	return tk, true
+}
+
+// userID returns a *int64 for a token, or nil for anonymous.
+func userID(tk *store.Token) *int64 {
+	if tk == nil {
+		return nil
+	}
+	return &tk.UserID
+}
+
+// userIDVal returns the caller's user id (0 for anonymous).
+func userIDVal(tk *store.Token) int64 {
+	if tk == nil {
+		return 0
+	}
+	return tk.UserID
+}
+
+// canRead reports whether the caller may read the repo. A public repo is
+// readable even anonymously; a private repo requires a role (owner / member) or
+// an open instance (no users at all) for dev/CLI.
+func (s *Server) canRead(rref store.RepoRef, tk *store.Token) bool {
+	role, err := s.cs.RoleOfRef(rref, userIDVal(tk))
+	if err == nil && role.CanRead() {
+		return true
+	}
+	return tk == nil && s.cs.IsOpenInstance()
+}
+
+// canPush reports whether the caller may push to the repo. Writing always
+// requires a credential; on an open instance (no users, legacy CLI) any
+// authenticated-or-anonymous writer is permitted for dev ergonomics — but the
+// production path is owner-only.
+func (s *Server) canPush(rref store.RepoRef, tk *store.Token) bool {
+	role, err := s.cs.RoleOfRef(rref, userIDVal(tk))
+	if err == nil && role.CanPush() {
+		return true
+	}
+	return s.cs.IsOpenInstance()
+}
+
+// requireRepoAccess guards a handler with repository write (push) or read ACL.
+// write=false for advertise/fetch; write=true for push. It records an audit
+// event on both allow and deny. Push is OWNER-only; read is any role (public is
+// readable anonymously).
+func (s *Server) requireRepoAccess(write bool, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Bound the request body to prevent unbounded memory use (413 on
+		// overrun; reads beyond the limit error out).
+		r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
+		tk, ok := s.authenticate(r)
+		if !ok {
+			s.auditDenied(r, nil, "bad token")
+			writeErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized: missing or invalid token"))
+			return
+		}
+		if write && tk == nil {
+			// Writing always requires a credential, even on an open instance.
+			s.auditDenied(r, nil, "anonymous write")
+			writeErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized: write requires a token"))
+			return
+		}
+		rref := store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
+		if write {
+			if !s.canPush(rref, tk) {
+				s.auditDenied(r, tk, "no write access")
+				writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no write access to %s", rref))
+				return
+			}
+		} else if !s.canRead(rref, tk) {
+			s.auditDenied(r, tk, "no read access")
+			// A private repo with no/invalid credential on the git smart-HTTP
+			// endpoints must be 401 (with WWW-Authenticate), NOT 403: git only
+			// retries with the credentials embedded in the URL on a 401, so a 403
+			// makes `git clone http://user:token@host/...` fail outright.
+			if isGitHTTPPath(r.URL.Path) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="easyvcs"`)
+				writeErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized: authentication required for %s", rref))
+				return
+			}
+			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no read access to %s", rref))
+			return
+		}
+		// Record the allowed read access (push success is recorded in handlePush).
+		if !write {
+			s.auditOK(r, tk, "")
+		}
+		// Stash the resolved token for the handler (avoid re-authenticating).
+		next(w, r.WithContext(withToken(r.Context(), tk)))
+	}
+}
+
+// requireRepoRead is the read guard for the repo-metadata endpoint
+// (GET /repos/{ns}/{name}). Unlike requireRepoAccess it distinguishes "the
+// repository does not exist" (404) from "it exists but the caller may not read
+// it" (403), so a client can tell a missing repo from a forbidden one without
+// the server leaking the existence of another tenant's private repo: a 403 is
+// still returned for anything that exists, and only a CONFIRMED absence is 404.
+//
+// All other endpoints keep requireRepoAccess (uniform 403) on purpose.
+func (s *Server) requireRepoRead(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
+		tk, ok := s.authenticate(r)
+		if !ok {
+			s.auditDenied(r, nil, "bad token")
+			writeErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized: missing or invalid token"))
+			return
+		}
+		rref := store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
+		// Absence is decided BEFORE the ACL check so a missing repo is 404 even
+		// when the caller is anonymous (on an open instance canRead is always
+		// true, which would otherwise mask the 404).
+		if _, err := s.cs.OpenRepo(rref); err != nil {
+			if errors.Is(err, store.ErrRepoNotFound) {
+				writeErr(w, http.StatusNotFound, err)
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !s.canRead(rref, tk) {
+			s.auditDenied(r, tk, "no read access")
+			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no read access to %s", rref))
+			return
+		}
+		s.auditOK(r, tk, "")
+		next(w, r.WithContext(withToken(r.Context(), tk)))
+	}
+}
+
+// actionName returns the protocol action for audit purposes.
+func actionName(r *http.Request) string {
+	p := r.URL.Path
+	switch {
+	case strings.HasSuffix(p, "/advertise"):
+		return "advertise"
+	case strings.HasSuffix(p, "/fetch"):
+		return "fetch"
+	case strings.HasSuffix(p, "/push"):
+		return "push"
+	default:
+		return r.Method + " " + p
+	}
+}
+
+// remoteIP returns the caller's IP. X-Forwarded-For is honored only when
+// EASYVCS_TRUSTED_PROXY is set (i.e. the server sits behind a trusted proxy);
+// otherwise the socket peer address is authoritative and client-supplied
+// headers are ignored (they are trivially spoofable).
+func remoteIP(r *http.Request) string {
+	if os.Getenv("EASYVCS_TRUSTED_PROXY") != "" {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
+	}
+	return r.RemoteAddr
+}
+
+func (s *Server) router() *http.ServeMux {
+	mux := http.NewServeMux()
+	// Liveness/readiness probes: unauthenticated and unaudited (see health.go).
+	mux.HandleFunc("GET /api/v1/healthz", s.handleHealthz)
+	mux.HandleFunc("GET /api/v1/readyz", s.handleReadyz)
+	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/advertise", s.requireRepoAccess(false, s.handleAdvertise))
+	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/fetch", s.requireRepoAccess(false, s.handleFetch))
+	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/push", s.requireRepoAccess(true, s.handlePush))
+	s.mountRR(mux)
+	s.mountHosting(mux)
+	s.mountUI(mux)
+	return mux
+}
+
+func (s *Server) repo(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {
+	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")})
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return nil, false
+	}
+	return repo, true
+}
+
+func (s *Server) handleAdvertise(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	changes, err := repo.ListRevisions()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	refs, err := repo.ListRefs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	var ids []string
+	hashes := make(map[string]string, len(changes))
+	for _, c := range changes {
+		ids = append(ids, c.ID)
+		hashes[c.ID] = c.Hash.String()
+	}
+	writeJSON(w, http.StatusOK, AdvertiseResp{Repo: repo.String(), Changes: ids, Refs: refs, ChangeHashes: hashes})
+}
+
+func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	req, err := decodeJSONBody[AdvertiseReq](r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	haveObj := map[string]bool{}
+	for _, o := range req.HaveObjects {
+		haveObj[o] = true
+	}
+	b, err := transfer.Collect(repo, req.Have, func(id object.ID) bool {
+		return haveObj[id.String()]
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(req.WantChanges) > 0 {
+		wanted := changeSetWithAncestors(repo, req.WantChanges, req.Have)
+		b = transfer.FilterBundleWant(b, wanted)
+	}
+	writeBundle(w, b)
+}
+
+func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
+	// The token resolved by requireRepoAccess, stashed in the request context.
+	tk := tokenFrom(r.Context())
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	// Read-only mirrors reject all writes.
+	if repo.IsMirror() {
+		s.auditDenied(r, tk, "mirror repo")
+		writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: %s is a read-only mirror", repo))
+		return
+	}
+	b, err := decodeBundleBody(r)
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeErr(w, http.StatusRequestEntityTooLarge, fmt.Errorf("request body exceeds limit (%d bytes)", mbe.Limit))
+			return
+		}
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	// Protected branches may only change through a merged Revision Request, so a
+	// direct push that would MOVE one is refused. This is the engine-level
+	// invariant that replaces an external "protect main" hack: the check is
+	// inside the per-repo lock (with the refs read) so it cannot be raced by a
+	// concurrent push. A no-op (target unchanged) is allowed; a new ref with a
+	// protected name is treated as a change (refused). Only branch refs are
+	// considered; objects/snapshots are never blocked here.
+	var protectedViolation []string
+	var conflicts []*store.Ref
+	var n int
+	err = s.withRepoLock(repo, func() error {
+		serverRefs, err := repo.ListRefs()
+		if err != nil {
+			return err
+		}
+		protected, err := repo.ProtectedBranches()
+		if err != nil {
+			return err
+		}
+		if len(protected) > 0 {
+			cur := make(map[string]string, len(serverRefs))
+			for _, rf := range serverRefs {
+				cur[rf.Name] = rf.Target
+			}
+			for _, inc := range b.Refs {
+				if inc.Kind != store.RefBranch {
+					continue
+				}
+				if !isProtectedBranch(protected, inc.Name) {
+					continue
+				}
+				if cur[inc.Name] == inc.Target {
+					continue // no-op: the ref does not move
+				}
+				protectedViolation = append(protectedViolation, inc.Name)
+			}
+			if len(protectedViolation) > 0 {
+				return nil
+			}
+		}
+		conflicts = transfer.CheckNonFastForward(repo, serverRefs, b.Refs, b)
+		if len(conflicts) > 0 {
+			return nil
+		}
+		n, err = transfer.Apply(repo, b)
+		return err
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(protectedViolation) > 0 {
+		s.auditDenied(r, tk, "protected branch push: "+strings.Join(protectedViolation, ","))
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error":              "protected-branch",
+			"protected_branches": protectedViolation,
+			"message":            "protected branch(es) can only change through a merged Revision Request: " + strings.Join(protectedViolation, ", "),
+		})
+		return
+	}
+	if len(conflicts) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":            "non-fast-forward",
+			"conflicting_refs": conflicts,
+			"message":          "non-fast-forward update rejected; pull and merge before pushing",
+		})
+		return
+	}
+	// Audit the successful write.
+	s.auditOK(r, tk, fmt.Sprintf("applied=%d", n))
+	writeJSON(w, http.StatusOK, map[string]any{"applied": n, "repo": repo.String()})
+}
+
+// isProtectedBranch reports whether `name` is in the protected set.
+func isProtectedBranch(protected []string, name string) bool {
+	for _, b := range protected {
+		if b == name {
+			return true
+		}
+	}
+	return false
+}
+
+// withToken stashes the resolved token in the request context for handlers.
+type ctxKey int
+
+const ctxToken ctxKey = iota
+
+func withToken(ctx context.Context, tk *store.Token) context.Context {
+	return context.WithValue(ctx, ctxToken, tk)
+}
+
+// tokenFrom retrieves the token stashed by requireRepoAccess (nil when
+// anonymous).
+func tokenFrom(ctx context.Context) *store.Token {
+	tk, _ := ctx.Value(ctxToken).(*store.Token)
+	return tk
+}
+
+// withRepoLock runs fn while holding the per-repository write lock. On SQLite
+// this is an in-process mutex; on Postgres it is a cross-replica advisory lock,
+// so two server instances serialise writes to the same repository.
+func (s *Server) withRepoLock(repo *store.Repo, fn func() error) error {
+	unlock, err := s.repoLocks.lock(context.Background(), repo.RepoID())
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
+}
+
+func changeSetWithAncestors(repo *store.Repo, wants []string, have []string) map[string]bool {
+	result := map[string]bool{}
+	changes, err := repo.ListRevisions()
+	if err != nil {
+		return result
+	}
+	byID := map[string]*store.Revision{}
+	snapOwner := map[string]string{}
+	for _, c := range changes {
+		byID[c.ID] = c
+		snapOwner[c.Hash.String()] = c.ID
+	}
+	haveSet := map[string]bool{}
+	for _, h := range have {
+		haveSet[h] = true
+	}
+	var visit func(id string)
+	visit = func(id string) {
+		if haveSet[id] || result[id] {
+			return
+		}
+		result[id] = true
+		ch := byID[id]
+		if ch == nil {
+			return
+		}
+		if snap, err := repo.GetSnapshot(ch.Hash); err == nil {
+			for _, p := range snap.Parents {
+				if owner := snapOwner[p.String()]; owner != "" {
+					visit(owner)
+				}
+			}
+		}
+	}
+	for _, w := range wants {
+		visit(w)
+	}
+	return result
+}
+
+func writeBundle(w http.ResponseWriter, b *transfer.Bundle) {
+	encoded, err := transfer.CompressBundle(b)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteHeader(http.StatusOK)
+	// A write failure while streaming the bundle is best-effort; headers are set
+	// and the client may simply have disconnected.
+	_, _ = w.Write(encoded)
+}
+
+func decodeBundleBody(r *http.Request) (*transfer.Bundle, error) {
+	// Wrap the raw body first (not the gzip stream): MaxBytesReader counts the
+	// compressed bytes actually read off the wire, which is the DoS-relevant
+	// size. (Wrapping the gzip reader would allow a zip bomb to inflate.)
+	raw := r.Body
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		// Feed the gzip reader the FULL (already MaxBytesReader-bounded) body.
+		// Do NOT wrap it in a small io.LimitReader: that bounds the WHOLE
+		// compressed stream, not just the header, so any bundle whose
+		// compressed size exceeds the cap is truncated mid-stream and
+		// io.ReadAll fails with "unexpected EOF". The compressed size is
+		// already bounded by MaxBytesReader; the decompressed size by
+		// maxInflatedBody below.
+		gr, err := gzip.NewReader(raw)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = gr.Close() }()
+		// Bound decompression too: a small gzip payload must not inflate to
+		// unbounded memory.
+		data, err := io.ReadAll(io.LimitReader(gr, maxInflatedBody))
+		if err != nil {
+			return nil, err
+		}
+		return unmarshalBundle(data)
+	}
+	data, err := io.ReadAll(raw)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalBundle(data)
+}
+
+// maxInflatedBody bounds the decompressed bundle size (16 GiB): compression
+// ratios beyond that are abusive.
+const maxInflatedBody = 16 << 30
+
+func unmarshalBundle(data []byte) (*transfer.Bundle, error) {
+	if bytes.HasPrefix(data, []byte("EVCSBUN")) {
+		return transfer.UnmarshalBinary(data)
+	}
+	var b transfer.Bundle
+	if err := json.Unmarshal(data, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+func decodeJSONBody[T any](r *http.Request) (T, error) {
+	var v T
+	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
+		return v, err
+	}
+	return v, nil
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	// Encode errors are best-effort for a response writer (client disconnect).
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// writeErr writes an error response. Client errors (4xx) carry the semantic
+// message; server errors (5xx) are collapsed to a generic message (the raw
+// error may leak SQL or filesystem details) and logged server-side instead.
+func writeErr(w http.ResponseWriter, code int, err error) {
+	if code >= http.StatusInternalServerError {
+		log.Printf("easyvcs-server: %d: %v", code, err)
+		writeJSON(w, code, map[string]any{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, code, map[string]any{"error": err.Error()})
+}

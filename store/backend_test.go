@@ -1,0 +1,69 @@
+package store
+
+import (
+	"os"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/easylab-platform/easyvcs/object"
+)
+
+func now() time.Time { return time.Now().UTC() }
+
+// TestBackendPostgres runs a full round-trip against Postgres if evaluated,
+// otherwise it is skipped. It is the integration probe for the pgx dialector.
+func TestBackendPostgres(t *testing.T) {
+	dsn := os.Getenv("EASYVCS_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("EASYVCS_TEST_PG_DSN not set; skipping postgres integration")
+	}
+	cs, err := OpenDriver(DriverConfig{Kind: KindPostgres, DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	roundTrip(t, cs)
+}
+
+// TestBackendMySQL runs a full round-trip against MySQL/MariaDB.
+func TestBackendMySQL(t *testing.T) {
+	dsn := os.Getenv("EASYVCS_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("EASYVCS_TEST_MYSQL_DSN not set; skipping mysql integration")
+	}
+	cs, err := OpenDriver(DriverConfig{Kind: KindMySQL, DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	roundTrip(t, cs)
+}
+
+func roundTrip(t *testing.T, cs *CentralStore) {
+	t.Helper()
+	ns := "n" + randSuffix()
+	repo, err := cs.Create(RepoRef{Namespace: ns, Name: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Snapshot{RevisionHash: object.BlobID([]byte("h" + ns)), RevisionID: "id1" + ns, TreeID: object.BlobID([]byte("t")), Description: "d", Author: Author{Name: "a"}, CommitTime: now()}
+	if err := repo.PutSnapshot(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PutRevision(&Revision{ID: "id1" + ns, Hash: s.RevisionHash, Created: now(), ChangedPaths: []string{"f"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PutRef(&Ref{Name: "main", Kind: RefBranch, Target: "id1" + ns}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetRevision("id1" + ns); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// randSuffix returns a short random-ish suffix so a shared Postgres instance
+// does not collide across runs (each run uses a fresh namespace).
+func randSuffix() string {
+	return strconv.FormatInt(time.Now().UnixNano(), 36)
+}

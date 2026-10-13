@@ -1,0 +1,10 @@
+# binaries
+/easyvcs
+/easylab
+*.db
+*.test
+
+# go
+go.work.sum
+/easyvcs-server
+/cmd/server/server
