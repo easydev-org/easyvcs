@@ -185,11 +185,19 @@ type RepoStore interface {
 	UpdateRevisionHashCAS(revisionID string, expectHash, newHash object.ID) error
 	ListRevisions() ([]*Revision, error)
 
-	// Refs.
+	// Refs. PutRef uses r.Path; GetRef/DeleteRef/ListRefs operate on the ROOT
+	// scope (path "") for back-compat. The *In variants take an explicit scope.
 	PutRef(r *Ref) error
 	DeleteRef(name string) error
 	GetRef(name string) (*Ref, error)
 	ListRefs() ([]*Ref, error)
+	DeleteRefIn(path, name string) error
+	GetRefIn(path, name string) (*Ref, error)
+	ListOwnRefs(path string) ([]*Ref, error)
+	// ListRefsIn returns the refs VISIBLE in a scope: root refs (projected down
+	// when hasDir reports the dir exists at the ref's tip) plus refs defined at
+	// the scope or under it. hasDir may be nil (every root ref projects).
+	ListRefsIn(path string, hasDir func(target string) bool) ([]*Ref, error)
 
 	// Transactional writes (for atomic commit from changes).
 	BeginTx() *gorm.DB

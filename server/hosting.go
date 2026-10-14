@@ -299,5 +299,9 @@ func userView(u *store.User) map[string]any {
 }
 
 func refView(r *store.Ref) map[string]any {
-	return map[string]any{"name": r.Name, "kind": string(r.Kind), "target": r.Target}
+	v := map[string]any{"name": r.Name, "kind": string(r.Kind), "target": r.Target}
+	if r.Path != "" {
+		v["path"] = r.Path // the scope this ref belongs to (absent = root)
+	}
+	return v
 }

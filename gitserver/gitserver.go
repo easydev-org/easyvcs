@@ -60,7 +60,13 @@ func Build(ws *revision.Workspace, repo *store.Repo, subpath string) (storer.Sto
 		trees:    map[object.ID]plumbing.Hash{},
 		blobs:    map[object.ID]plumbing.Hash{},
 	}
-	refs, err := repo.ListRefs()
+	// Refs VISIBLE in this scope (docs/subrepo-scopes.md): for a subdir, the
+	// root's refs project down (only when the dir exists at the ref's tip) plus
+	// the scope's OWN refs. This keeps a subdir clone from seeing an unrelated
+	// scope's refs (the pre-scope ListRefs() leaked every scope's refs).
+	// hasDir gates root-ref projection: a root ref whose tip lacks the subdir is
+	// not offered in the subdir's clone (matching the API's ?path= view).
+	refs, err := repo.ListRefsIn(b.sub, b.ws.HasDir(b.sub))
 	if err != nil {
 		return nil, err
 	}

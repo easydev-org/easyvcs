@@ -97,14 +97,81 @@ func (w *Workspace) SetRef(name string, kind store.RefKind, revisionID string) (
 	return r, nil
 }
 
-// DeleteRef removes a ref.
+// SetRefIn creates or updates a branch/tag in a SCOPE ("path"; "" = root).
+// A tag stays immutable within its scope.
+func (w *Workspace) SetRefIn(path, name string, kind store.RefKind, revisionID string) (*store.Ref, error) {
+	if kind == store.RefTag {
+		if existing, err := w.store.GetRefIn(path, name); err == nil && existing != nil {
+			return nil, fmt.Errorf("tag %q already exists in scope %q; delete it before re-tagging", name, path)
+		}
+	}
+	r := &store.Ref{Name: name, Kind: kind, Target: revisionID, Path: path}
+	if err := w.store.PutRef(r); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// DeleteRef removes a ROOT-scope ref. Use DeleteRefIn for a sub-scope.
 func (w *Workspace) DeleteRef(name string) error { return w.store.DeleteRef(name) }
 
-// GetRef returns a ref by name.
+// DeleteRefIn removes a ref in a scope.
+func (w *Workspace) DeleteRefIn(path, name string) error { return w.store.DeleteRefIn(path, name) }
+
+// GetRef returns a ROOT-scope ref by name. Use GetRefIn for a sub-scope.
 func (w *Workspace) GetRef(name string) (*store.Ref, error) { return w.store.GetRef(name) }
 
-// ListRefs returns all refs.
+// GetRefIn returns a ref by (scope path, name).
+func (w *Workspace) GetRefIn(path, name string) (*store.Ref, error) {
+	return w.store.GetRefIn(path, name)
+}
+
+// ListRefs returns every ref of the repository, regardless of scope.
 func (w *Workspace) ListRefs() ([]*store.Ref, error) { return w.store.ListRefs() }
+
+// ListRefsIn returns the refs VISIBLE in a scope: the root's refs project down
+// (only when the dir exists at the ref's tip), plus the scope's own refs and the
+// refs of deeper scopes. This is the projection rule from docs/subrepo-scopes.md.
+func (w *Workspace) ListRefsIn(path string) ([]*store.Ref, error) {
+	return w.store.ListRefsIn(path, w.HasDir(path))
+}
+
+// HasDir returns a predicate reporting whether a revision's tree contains the
+// directory at sub (used to decide whether a root ref projects into a scope).
+// Returns nil for the root scope (every ref projects).
+func (w *Workspace) HasDir(sub string) func(target string) bool {
+	sub = strings.Trim(strings.TrimSpace(sub), "/")
+	if sub == "" {
+		return nil
+	}
+	return func(target string) bool {
+		rev, err := w.store.GetRevision(target)
+		if err != nil || rev == nil {
+			return false
+		}
+		snap, err := w.store.GetSnapshot(rev.Hash)
+		if err != nil || snap == nil {
+			return false
+		}
+		t, err := w.ReadTree(snap.TreeID)
+		if err != nil {
+			return false
+		}
+		cur := t
+		for _, seg := range strings.Split(sub, "/") {
+			e, ok := cur.Entries[seg]
+			if !ok || e.Kind != object.KindTree {
+				return false
+			}
+			next, ok := w.readTreeEntry(e)
+			if !ok || next == nil {
+				return false
+			}
+			cur = next
+		}
+		return true
+	}
+}
 
 func (w *Workspace) readTreeEntry(e object.Entry) (*object.Tree, bool) {
 	if e.Kind != object.KindTree {

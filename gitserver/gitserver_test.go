@@ -12,6 +12,7 @@ import (
 	"github.com/easylab-platform/easyvcs/object"
 	"github.com/easylab-platform/easyvcs/revision"
 	"github.com/easylab-platform/easyvcs/store"
+	"github.com/go-git/go-git/v5/plumbing/storer"
 )
 
 // TestGitClone serves an easyvcs repo over smart HTTP and clones it with the
@@ -128,4 +129,75 @@ func TestGitCloneSubdir(t *testing.T) {
 	if n := len(strings.Split(strings.TrimSpace(string(logOut)), "\n")); n != 2 {
 		t.Fatalf("subdir history has %d commits, want 2:\n%s", n, logOut)
 	}
+}
+
+// TestSubdirRefScopeNoLeak verifies the projection rule at the git layer
+// (docs/subrepo-scopes.md §9): a branch scoped to pkg-a is NOT offered in the
+// repo root's clone, and a branch scoped to pkg-b is NOT offered in pkg-a's
+// clone. Root branches still project into the subdirs whose tip has them.
+func TestSubdirRefScopeNoLeak(t *testing.T) {
+	t.Setenv("EASYVCS_HOME", t.TempDir())
+	cs, err := store.OpenDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	repo, _ := cs.Create(store.RepoRef{Namespace: "acme", Name: "mono"})
+	ws := revision.NewWorkspace(repo)
+	_, rev, _ := ws.CommitFromChanges(object.ID{},
+		[]revision.FileChangeSpec{
+			{Path: "pkg-a/a.go", Content: []byte("package a\n")},
+			{Path: "pkg-b/b.go", Content: []byte("package b\n")},
+		}, "init", store.Author{Name: "t"}, "")
+	// Root branch main + two scoped branches.
+	_, _ = ws.SetRef("main", store.RefBranch, rev.ID)
+	_, _ = ws.SetRefIn("pkg-a", "feat-a", store.RefBranch, rev.ID)
+	_, _ = ws.SetRefIn("pkg-b", "feat-b", store.RefBranch, rev.ID)
+
+	// Root clone: sees only `main` (no feat-a / feat-b).
+	rootSto, err := Build(ws, repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootRefs := refNamesOf(t, rootSto)
+	if !rootRefs["main"] {
+		t.Fatalf("root clone should have main: %v", rootRefs)
+	}
+	if rootRefs["feat-a"] || rootRefs["feat-b"] {
+		t.Fatalf("a scoped branch leaked into the root clone: %v", rootRefs)
+	}
+
+	// pkg-a clone: main (projected) + feat-a (own), NOT feat-b.
+	aSto, err := Build(ws, repo, "pkg-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aRefs := refNamesOf(t, aSto)
+	if !aRefs["main"] || !aRefs["feat-a"] {
+		t.Fatalf("pkg-a clone = %v, want main + feat-a", aRefs)
+	}
+	if aRefs["feat-b"] {
+		t.Fatalf("a sibling scope's branch leaked into pkg-a: %v", aRefs)
+	}
+}
+
+// refNamesOf lists the short branch names in a storer.
+func refNamesOf(t *testing.T, sto storer.Storer) map[string]bool {
+	t.Helper()
+	it, err := sto.IterReferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for {
+		ref, err := it.Next()
+		if err != nil {
+			break
+		}
+		if ref.Name().IsBranch() {
+			out[ref.Name().Short()] = true
+		}
+	}
+	it.Close()
+	return out
 }

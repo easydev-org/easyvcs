@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/easylab-platform/easyvcs/revision"
 	"github.com/easylab-platform/easyvcs/store"
@@ -10,12 +11,20 @@ import (
 
 // ---- M3: refs ----
 
+// scopePath reads the ?path= query (a sub-repo scope). "" = the root scope.
+func scopePath(r *http.Request) string {
+	return strings.Trim(strings.TrimSpace(r.URL.Query().Get("path")), "/")
+}
+
 func (s *Server) handleListRefs(w http.ResponseWriter, r *http.Request) {
 	repo, ok := s.repo(w, r)
 	if !ok {
 		return
 	}
-	refs, err := repo.ListRefs()
+	// A ?path= scopes the listing (docs/subrepo-scopes.md): the root's refs
+	// project down (when the dir exists at the ref's tip) plus the scope's own.
+	path := scopePath(r)
+	refs, err := revision.NewWorkspace(repo).ListRefsIn(path)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -32,7 +41,7 @@ func (s *Server) handleListBranches(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	refs, err := repo.ListRefs()
+	refs, err := revision.NewWorkspace(repo).ListRefsIn(scopePath(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -59,6 +68,9 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeJSONBody[struct {
 		Name string `json:"name"`
 		From string `json:"from"`
+		// Path scopes the branch to a sub-repo ("" = root). May also be given as
+		// ?path= (docs/subrepo-scopes.md).
+		Path string `json:"path"`
 	}](r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -68,9 +80,13 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
+	path := strings.Trim(strings.TrimSpace(req.Path), "/")
+	if path == "" {
+		path = scopePath(r)
+	}
 	ws := revision.NewWorkspace(repo)
-	// Idempotent: an existing branch is returned unchanged.
-	if cur, err := ws.GetRef(req.Name); err == nil && cur != nil && cur.Kind == store.RefBranch {
+	// Idempotent: an existing branch (in this scope) is returned unchanged.
+	if cur, err := ws.GetRefIn(path, req.Name); err == nil && cur != nil && cur.Kind == store.RefBranch {
 		writeJSON(w, http.StatusOK, refView(cur))
 		return
 	}
@@ -86,7 +102,7 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	ref, err := ws.SetRef(req.Name, store.RefBranch, ch.ID)
+	ref, err := ws.SetRefIn(path, req.Name, store.RefBranch, ch.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -105,11 +121,11 @@ func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := revision.NewWorkspace(repo)
-	if err := ws.DeleteRef(branch); err != nil {
+	if err := ws.DeleteRefIn(scopePath(r), branch); err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "branch": branch})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "branch": branch, "path": scopePath(r)})
 }
 
 func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
