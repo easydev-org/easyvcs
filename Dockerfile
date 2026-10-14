@@ -5,9 +5,9 @@
 # buildkitd, then pushes to the deployment registry via skopeo). No local build
 # daemon required.
 #
-# Build context: the easyvcs repo root (a SINGLE Go module — no go.work, so the
-# build does NOT need `cd cmd`). Third-party deps resolve from GOPROXY through
-# the build proxy.
+# Build context: the easyvcs repo root. The server lives in the ROOT module
+# (the CLI is a separate module under ./cli). GOWORK=off keeps this build to the
+# root module only; third-party deps resolve from GOPROXY through the proxy.
 #
 # The server persists to a single SQL database. The default is SQLite (pure Go,
 # via glebarez/sqlite — CGO_ENABLED=0), stored under EASYVCS_HOME (/data), so
@@ -29,8 +29,9 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
 RUN apk add --no-cache ca-certificates git
 WORKDIR /src
 COPY . .
-# Single module: build ./cmd/server directly (no `cd cmd`). `-mod=mod` lets Go
-# reconcile go.sum if needed; `-trimpath -s -w` keeps the binary small.
+# Build ./cmd/server from the root module (the CLI module under ./cli is NOT
+# needed here). `-mod=mod` lets Go reconcile go.sum; `-trimpath -s -w` keeps the
+# binary small.
 RUN go build -mod=mod -trimpath -ldflags="-s -w" -o /out/easyvcs-server ./cmd/server
 
 # ---- runtime ----

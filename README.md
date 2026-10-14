@@ -141,7 +141,7 @@ npm i git+http://<user>:<token>@<server>/api/v1/repos/{ns}/{name}/<subdir>.git
 ## Build
 
 ```
-CGO_ENABLED=0 go build -o easyvcs ./cmd/easyvcs
+CGO_ENABLED=0 go build -o easyvcs ./cli        # the CLI is its own module
 CGO_ENABLED=0 go build -o easyvcs-server ./cmd/server
 ```
 

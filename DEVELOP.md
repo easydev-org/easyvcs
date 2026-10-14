@@ -19,7 +19,7 @@ agent-webui / easysidecar）都应遵循；各仓可在自己的 DEVELOP.md 里�
 
 | 路径 | 行数 | 理由 |
 |---|---|---|
-| （示例）`cmd/easyvcs/main.go` | — | 待拆分，见 issue |
+| （示例）`cli/main.go` | — | 待拆分，见 issue |
 
 ## 3. 其它既有约定（简短，避免与 README 重复）
 
@@ -58,9 +58,9 @@ export GOPROXY=$ARTIFACT/artifacts/go GOSUMDB=off
 
 维护者已知的超长文件，按优先级拆分（不要求一次全清，但**新增改动不得加剧**）：
 
-- `cmd/easyvcs/main.go`（>1200）— CLI 子命令应拆到 `cmd/easyvcs/*.go`
+- `cli/main.go`（>1200）— CLI 子命令应拆到 `cli/*.go`
 - `revision/revision_ops.go`（>1100）— 按操作类别拆分
-- `cmd/easyvcs/remote.go`（>900）
+- `cli/remote.go`（>900）
 - `server/server.go`（>650）、`gitbridge/gitbridge.go`（>580）、`server/rr.go`（>500）
 
 ## 5. 合并前判断（review 方法）

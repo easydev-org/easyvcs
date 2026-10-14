@@ -197,7 +197,7 @@ gc [--dry-run] / verify       维护（见 §13.2）
 ## 13. 构建
 
 ```
-CGO_ENABLED=0 go build -o easyvcs ./cmd/easyvcs
+CGO_ENABLED=0 go build -o easyvcs ./cli        # the CLI is its own module
 CGO_ENABLED=0 go build -o easyvcs-server ./cmd/server
 ```
 

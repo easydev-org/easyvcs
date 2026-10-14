@@ -35,7 +35,8 @@ BASE_REGISTRY="${BASE_REGISTRY:-artifact.worker.svc.cluster.local}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
-# Context is the repo root (single module: go.mod + all packages + cmd/).
+# Context is the repo root (root module + the ./cli module; the server build
+# uses GOWORK=off and only the root module).
 # Exclude VCS metadata and any local data dir to keep the context small.
 CTX="${WORK}/ctx"
 mkdir -p "${CTX}"

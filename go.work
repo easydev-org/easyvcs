@@ -1,0 +1,10 @@
+// Local development workspace: ties the root engine module and the CLI module
+// together so `go build ./...` / `go test ./...` work across both without a
+// published version. NOT used by the Docker build (which builds each module
+// independently).
+go 1.26.5
+
+use (
+	.
+	./cli
+)
