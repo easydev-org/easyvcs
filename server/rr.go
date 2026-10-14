@@ -138,8 +138,10 @@ func rrIID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 type rrCreateReq struct {
 	SourceSnapshot string `json:"source_snapshot"`
 	TargetBranch   string `json:"target_branch"`
-	Title          string `json:"title"`
-	Body           string `json:"body"`
+	// Path scopes the RR to a subdirectory (docs/subrepo-scopes.md §7.3).
+	Path  string `json:"path"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
 }
 
 func (s *Server) handleRRCreate(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +165,7 @@ func (s *Server) handleRRCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	src := rr.Source{Snapshot: id}
 	tk := tokenFrom(r.Context())
-	created, err := svc.Create(src, req.TargetBranch, req.Title, req.Body, userID(tk))
+	created, err := svc.CreateScoped(src, req.TargetBranch, req.Path, req.Title, req.Body, userID(tk))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -499,7 +501,7 @@ func (s *Server) handleRRClose(w http.ResponseWriter, r *http.Request) {
 
 // rrView renders an RR for JSON.
 func rrView(x *store.RevisionRequest) map[string]any {
-	return map[string]any{
+	v := map[string]any{
 		"iid":             x.IID,
 		"source_snapshot": x.SourceSnapshot,
 		"base_snapshot":   x.BaseSnapshot,
@@ -508,6 +510,10 @@ func rrView(x *store.RevisionRequest) map[string]any {
 		"title":           x.Title, "body": x.Body,
 		"created": x.Created.UnixMilli(), "updated": x.Updated.UnixMilli(),
 	}
+	if x.Path != "" {
+		v["path"] = x.Path // the scope this RR is limited to
+	}
+	return v
 }
 
 // rrViewDetail is rrView plus the RR's reviews and comments, which the detail

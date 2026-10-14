@@ -37,6 +37,10 @@ type commitReq struct {
 	Author     *store.Author  `json:"author"`
 	Parents    []string       `json:"parents"`
 	Files      []commitFileOp `json:"files"`
+	// Path scopes the commit to a SUBDIRECTORY (docs/subrepo-scopes.md §5): the
+	// file ops are relative to that dir and are LIFTED onto the root branch —
+	// the new root revision touches only that subtree. Empty = a normal commit.
+	Path string `json:"path"`
 }
 
 // handleCommitFiles applies a set of file operations to a NON-default branch
@@ -128,6 +132,31 @@ func (s *Server) handleCommitFiles(w http.ResponseWriter, r *http.Request) {
 	var rev *store.Revision
 	var snap *store.Snapshot
 	conflict := ""
+	// Sub-repo scope: LIFT the (scope-relative) file ops onto the root branch.
+	// The new root revision touches only the subtree at req.Path.
+	if scope := strings.Trim(strings.TrimSpace(req.Path), "/"); scope != "" {
+		if req.RevisionID != "" {
+			writeErr(w, http.StatusBadRequest, errors.New("revision_id (amend) is not supported with path"))
+			return
+		}
+		err = s.withRepoLock(repo, func() error {
+			newSnap, newRev, lerr := ws.Lift(req.Branch, scope, changes, req.Message, author)
+			if lerr != nil {
+				return lerr
+			}
+			snap, rev = newSnap, newRev
+			return nil
+		})
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		s.auditOK(r, tokenFrom(r.Context()), fmt.Sprintf("lift path=%s branch=%s rev=%s", scope, req.Branch, rev.ID))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "branch": req.Branch, "path": scope, "revision_id": rev.ID, "snapshot": snap.RevisionHash.String(),
+		})
+		return
+	}
 	err = s.withRepoLock(repo, func() error {
 		tipID := ""
 		if ref, rerr := ws.GetRef(req.Branch); rerr == nil && ref != nil && ref.Kind == store.RefBranch {

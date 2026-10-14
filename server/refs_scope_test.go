@@ -160,3 +160,66 @@ func TestRefViewIncludesPath(t *testing.T) {
 		t.Fatalf("refView path = %v, want frontend (%s)", m["path"], rec.Body.String())
 	}
 }
+
+// A commit with ?path=/path in the body LIFTS the (scope-relative) file ops onto
+// the root branch: the new root revision touches only that subtree.
+func TestCommitWithPathLifts(t *testing.T) {
+	_, mux, tok, repo := hostingTestServerWithDirs(t, "frontend", "backend")
+
+	// A non-protected branch to lift onto (main is protected).
+	if rec := hreq(mux, http.MethodPost, "/api/v1/repos/team/app/branches", tok,
+		map[string]any{"name": "feature", "from": "main"}); rec.Code != 200 {
+		t.Fatalf("create feature = %d %s", rec.Code, rec.Body.String())
+	}
+	// Commit a change to frontend/app.ts (path-relative), on feature.
+	rec := hreq(mux, http.MethodPost, "/api/v1/repos/team/app/commit", tok,
+		map[string]any{
+			"branch":  "feature",
+			"message": "edit frontend",
+			"path":    "frontend",
+			"files":   []map[string]any{{"path": "app.ts", "operation": "create", "content": "v2\n"}},
+		})
+	if rec.Code != 200 {
+		t.Fatalf("lift commit = %d %s", rec.Code, rec.Body.String())
+	}
+	resp := decode(t, rec)
+	if resp["path"] != "frontend" {
+		t.Fatalf("response path = %v", resp["path"])
+	}
+	// The root main tip now has frontend/app.ts; backend is untouched.
+	ws := revision.NewWorkspace(repo)
+	ref, err := ws.GetRef("feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev, _ := repo.GetRevision(ref.Target)
+	snap, _ := repo.GetSnapshot(rev.Hash)
+	if _, err := ws.FindEntry(ws.MustTree(snap.TreeID), "frontend/app.ts"); err != nil {
+		t.Fatal("frontend/app.ts should exist after lift")
+	}
+	if _, err := ws.FindEntry(ws.MustTree(snap.TreeID), "backend/file.txt"); err != nil {
+		t.Fatal("backend/file.txt must be preserved by the lift")
+	}
+	// The lifted revision changed ONLY the frontend path.
+	if len(rev.ChangedPaths) != 1 || rev.ChangedPaths[0] != "frontend/app.ts" {
+		t.Fatalf("lifted ChangedPaths = %v", rev.ChangedPaths)
+	}
+}
+
+// A root commit (no path) still works exactly as before.
+func TestCommitWithoutPathUnchanged(t *testing.T) {
+	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend")
+	if rec := hreq(mux, http.MethodPost, "/api/v1/repos/team/app/branches", tok,
+		map[string]any{"name": "feature", "from": "main"}); rec.Code != 200 {
+		t.Fatalf("create feature = %d %s", rec.Code, rec.Body.String())
+	}
+	rec := hreq(mux, http.MethodPost, "/api/v1/repos/team/app/commit", tok,
+		map[string]any{
+			"branch":  "feature",
+			"message": "root edit",
+			"files":   []map[string]any{{"path": "top.txt", "operation": "create", "content": "x\n"}},
+		})
+	if rec.Code != 200 {
+		t.Fatalf("root commit = %d %s", rec.Code, rec.Body.String())
+	}
+}

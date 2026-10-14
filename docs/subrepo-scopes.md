@@ -178,12 +178,19 @@ npm i git+http://.../easydev-org/easyagent/frontend.git
 
 ## 11. 落地阶段
 
-| 阶段 | 内容 |
-|---|---|
-| **S1** | refs 加 `path` + 迁移（现有 `path=""`）+ 作用域 refs API + **投影规则** |
-| **S2** | `π(Q, R)` 派生 revision_id（零存储） |
-| **S3** | `lift`（子 → 根）|
-| **S4** | RR / release / 保护规则加 `path` |
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| **S1** | refs 加 `path` + 作用域 refs API + **投影规则** | ✅ 已完成 |
+| **S3** | `lift`（子 → 根）：子目录改动提交到根 revision | ✅ 已完成 |
+| **S4** | RR 加 `path`（子目录 RR，diff/合并按 path 收窄）| ✅ 已完成 |
+| **S2** | `π(Q, R)` 派生 revision_id（零存储） | ❌ **不做** |
 
-**S1 即可让「子目录有独立 branch + 看到父 branch 的投影」成立**——本模型的
-最小可用切片。
+**关于 S2（决定不做）**：S2 原本要给「子目录视角的 revision」一个派生的稳定 id
+（`H(R.id‖Q)`）。但 **RR 的主体是 `source_snapshot`（内容寻址的 snapshot），
+不是 revision id**；而 snapshot 天然包含整仓内容，「子目录视角」只是**读时按
+`path` 收窄**（§7.3）。因此 **S4 让子目录 RR 直接用「根 snapshot + path」即可**
+——**不需要派生 id 层**，S2 省去。派生 id 的唯一好处（子目录 git commit hash 不
+随根 rebase 变）被认为**不值得**（git 自身 rebase 也会改 hash）。
+
+**S1 + S3 + S4 已让「子目录有独立 branch、看到父 branch 投影、能提交（lift）、
+能开/合并 scoped RR」全部成立。**

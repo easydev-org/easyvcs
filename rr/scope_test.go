@@ -1,0 +1,127 @@
+package rr
+
+import (
+	"testing"
+
+	"github.com/easylab-platform/easyvcs/object"
+	"github.com/easylab-platform/easyvcs/revision"
+	"github.com/easylab-platform/easyvcs/store"
+)
+
+// A scoped RR (docs/subrepo-scopes.md §7.3) limits its diff and merge to one
+// subtree: a change under `path` merges without touching the rest of the repo.
+
+// commitNested commits a snapshot whose tree contains the given full paths
+// ("frontend/app.ts"), on top of parents (which may be nil). It uses
+// CommitFromChanges so nested paths are materialized correctly.
+func commitNested(t *testing.T, ws *revision.Workspace, parents []object.ID, files map[string]string, msg string) *store.Snapshot {
+	t.Helper()
+	var parentHash object.ID
+	if len(parents) > 0 {
+		parentHash = parents[0]
+	}
+	changes := make([]revision.FileChangeSpec, 0, len(files))
+	for p, c := range files {
+		changes = append(changes, revision.FileChangeSpec{Path: p, Content: []byte(c)})
+	}
+	snap, _, err := ws.CommitFromChanges(parentHash, changes, msg, store.Author{Name: "t", Email: "t@x"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snap
+}
+
+func TestScopedRRDiffIsLimitedToPath(t *testing.T) {
+	cs, repo := newStore(t)
+	_ = cs
+	ws := revision.NewWorkspace(repo)
+	svc := New(cs, repo)
+
+	base := commitNested(t, ws, nil, map[string]string{
+		"frontend/app.ts": "v1\n",
+		"backend/srv.go":  "s1\n",
+	}, "base")
+	_, _ = ws.SetRef("main", store.RefBranch, base.RevisionID)
+
+	// A source that changes frontend AND backend.
+	src := commitNested(t, ws, []object.ID{base.RevisionHash}, map[string]string{
+		"frontend/app.ts": "v2\n",
+		"backend/srv.go":  "s2\n",
+	}, "both")
+
+	// A scoped RR to frontend: the diff shows ONLY frontend/app.ts.
+	req, err := svc.CreateScoped(Source{Snapshot: src.RevisionHash}, "main", "frontend", "fe change", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Path != "frontend" {
+		t.Fatalf("RR path = %q", req.Path)
+	}
+	diff, err := svc.Diff(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diff) != 1 {
+		t.Fatalf("scoped diff = %d files, want 1: %+v", len(diff), diff)
+	}
+	if diff[0].Path != "app.ts" {
+		t.Fatalf("diff path = %q, want app.ts (relative to the scope)", diff[0].Path)
+	}
+
+	// An UNSCOPED RR sees BOTH files.
+	reqAll, _ := svc.Create(Source{Snapshot: src.RevisionHash}, "main", "all", "", nil)
+	diffAll, _ := svc.Diff(reqAll)
+	if len(diffAll) != 2 {
+		t.Fatalf("unscoped diff = %d files, want 2", len(diffAll))
+	}
+}
+
+func TestScopedRRMergeOnlyTouchesSubtree(t *testing.T) {
+	cs, repo := newStore(t)
+	_ = cs
+	ws := revision.NewWorkspace(repo)
+	svc := New(cs, repo)
+
+	base := commitNested(t, ws, nil, map[string]string{
+		"frontend/app.ts": "v1\n",
+		"backend/srv.go":  "s1\n",
+	}, "base")
+	_, _ = ws.SetRef("main", store.RefBranch, base.RevisionID)
+
+	// Source changes only frontend (a proper scoped change).
+	src := commitNested(t, ws, []object.ID{base.RevisionHash}, map[string]string{
+		"frontend/app.ts": "v2\n",
+		"backend/srv.go":  "s1\n",
+	}, "frontend only")
+	req, _ := svc.CreateScoped(Source{Snapshot: src.RevisionHash}, "main", "frontend", "fe", "", nil)
+
+	res, err := svc.ApplyMerge(req, testAuthor(), testUserID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Clean {
+		t.Fatalf("scoped merge should be clean: %+v", res.Conflicts)
+	}
+	// main now has frontend/app.ts = v2, backend untouched.
+	ref, _ := ws.GetRef("main")
+	rev, _ := repo.GetRevision(ref.Target)
+	snap, _ := repo.GetSnapshot(rev.Hash)
+	root := ws.MustTree(snap.TreeID)
+	feE, _ := ws.FindEntry(root, "frontend/app.ts")
+	if got := mustBlob(t, ws, feE.ID); got != "v2\n" {
+		t.Fatalf("frontend/app.ts = %q", got)
+	}
+	beE, _ := ws.FindEntry(root, "backend/srv.go")
+	if got := mustBlob(t, ws, beE.ID); got != "s1\n" {
+		t.Fatalf("backend/srv.go changed: %q", got)
+	}
+}
+
+func mustBlob(t *testing.T, ws *revision.Workspace, id object.ID) string {
+	t.Helper()
+	b, err := ws.ReadBlob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}

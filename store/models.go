@@ -212,12 +212,15 @@ type revisionRequestRow struct {
 	// BaseSnapshot is the PINNED target tip snapshot at creation time.
 	BaseSnapshot string `gorm:"not null;default:''"`
 	TargetBranch string `gorm:"not null;default:'main'"`
-	State        string `gorm:"not null;default:'open'"`
-	Title        string `gorm:"not null"`
-	Body         string `gorm:"not null;default:''"`
-	AuthorID     *int64
-	Created      int64 `gorm:"not null"`
-	Updated      int64 `gorm:"not null"`
+	// Path scopes the RR to a SUBDIRECTORY (docs/subrepo-scopes.md §7.3): the
+	// diff and merge are limited to that subtree. "" = the whole repo.
+	Path     string `gorm:"not null;default:''"`
+	State    string `gorm:"not null;default:'open'"`
+	Title    string `gorm:"not null"`
+	Body     string `gorm:"not null;default:''"`
+	AuthorID *int64
+	Created  int64 `gorm:"not null"`
+	Updated  int64 `gorm:"not null"`
 }
 
 func (revisionRequestRow) TableName() string { return "revision_requests" }

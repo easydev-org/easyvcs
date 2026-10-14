@@ -9,6 +9,7 @@ package rr
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/easylab-platform/easyvcs/object"
 	"github.com/easylab-platform/easyvcs/revision"
@@ -44,6 +45,12 @@ func New(cs *store.CentralStore, repo *store.Repo) *Service {
 // the CURRENT target branch tip as base_snapshot. Neither value changes
 // afterwards (a snapshot is immutable).
 func (s *Service) Create(src Source, targetBranch, title, body string, authorID *int64) (*store.RevisionRequest, error) {
+	return s.CreateScoped(src, targetBranch, "", title, body, authorID)
+}
+
+// CreateScoped is Create with a scope path (docs/subrepo-scopes.md §7.3): the
+// RR's diff and merge are limited to the subtree at `scope` ("" = whole repo).
+func (s *Service) CreateScoped(src Source, targetBranch, scope, title, body string, authorID *int64) (*store.RevisionRequest, error) {
 	if targetBranch == "" {
 		targetBranch = "main"
 	}
@@ -64,6 +71,7 @@ func (s *Service) Create(src Source, targetBranch, title, body string, authorID 
 		SourceSnapshot: src.Snapshot.String(),
 		BaseSnapshot:   base.String(),
 		TargetBranch:   targetBranch,
+		Path:           strings.Trim(strings.TrimSpace(scope), "/"),
 		State:          store.RROpen,
 		Title:          title,
 		Body:           body,
@@ -108,7 +116,36 @@ func (s *Service) Diff(rr *store.RevisionRequest) ([]revision.FileDiff, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A scoped RR diffs only the subtree at its path (docs/subrepo-scopes.md §7.3).
+	if p := strings.Trim(strings.TrimSpace(rr.Path), "/"); p != "" {
+		bt, err := s.subtreeAt(baseTree, p)
+		if err != nil {
+			return nil, err
+		}
+		st, err := s.subtreeAt(srcTree, p)
+		if err != nil {
+			return nil, err
+		}
+		return s.ws.DiffContent(bt, st)
+	}
 	return s.ws.DiffContent(baseTree, srcTree)
+}
+
+// subtreeAt returns the subtree id at path within treeID, or the empty id when
+// the path is absent (so a scoped diff against a missing dir is "all adds").
+func (s *Service) subtreeAt(treeID object.ID, path string) (object.ID, error) {
+	if treeID == (object.ID{}) {
+		return object.ID{}, nil
+	}
+	root, err := s.ws.ReadTree(treeID)
+	if err != nil {
+		return object.ID{}, err
+	}
+	e, err := s.ws.FindEntry(root, path)
+	if err != nil || e.Kind != object.KindTree {
+		return object.ID{}, nil
+	}
+	return e.ID, nil
 }
 
 // Update explicitly re-pins an RR to a new source snapshot (and the current
@@ -209,15 +246,13 @@ func (s *Service) ComputeMerge(rr *store.RevisionRequest, merger store.Author) (
 	if err != nil {
 		return MergeResult{}, err
 	}
-	srcSnap, err := s.snapshotOf(rr.SourceSnapshot)
+	// base: the pinned creation-time target tip tree, or the empty tree when the
+	// target branch did not exist then (zero base_snapshot).
+	baseTree, err := s.baseTree(rr)
 	if err != nil {
 		return MergeResult{}, err
 	}
-	// base: the pinned creation-time target tip tree. When the source does NOT
-	// descend from it (a non-descendant / root source), re-base onto the source's
-	// own parent so the merge applies the source's CHANGES rather than wiping the
-	// branch (see mergeBase).
-	baseTree, err := s.mergeBase(rr, srcSnap)
+	srcSnap, err := s.snapshotOf(rr.SourceSnapshot)
 	if err != nil {
 		return MergeResult{}, err
 	}
@@ -234,6 +269,39 @@ func (s *Service) ComputeMerge(rr *store.RevisionRequest, merger store.Author) (
 	mergedTree, atoms, err := s.ws.Merge(baseTree, srcSnap.TreeID, targetTree)
 	if err != nil {
 		return MergeResult{}, err
+	}
+	// A scoped RR merges ONLY the subtree at its path: merge the subtree and
+	// splice the result back into the target tree, so a change in one
+	// subdirectory never touches the rest of the repo (docs/subrepo-scopes.md
+	// §7.3). Conflicts are reported relative to the scope root.
+	if p := strings.Trim(strings.TrimSpace(rr.Path), "/"); p != "" {
+		bt, err := s.subtreeAt(baseTree, p)
+		if err != nil {
+			return MergeResult{}, err
+		}
+		st, err := s.subtreeAt(srcSnap.TreeID, p)
+		if err != nil {
+			return MergeResult{}, err
+		}
+		tt, err := s.subtreeAt(targetTree, p)
+		if err != nil {
+			return MergeResult{}, err
+		}
+		subMerged, subAtoms, err := s.ws.Merge(bt, st, tt)
+		if err != nil {
+			return MergeResult{}, err
+		}
+		// Splice the merged subtree back into the target tree at p.
+		newRoot, err := s.ws.SpliceSubtree(targetTree, p, subMerged)
+		if err != nil {
+			return MergeResult{}, err
+		}
+		mergedTree = newRoot
+		atoms = nil
+		for _, a := range subAtoms {
+			a.Path = p + "/" + strings.TrimPrefix(a.Path, "/")
+			atoms = append(atoms, a)
+		}
 	}
 	res := MergeResult{Clean: len(atoms) == 0}
 	for _, a := range atoms {
@@ -429,73 +497,6 @@ func (s *Service) baseTree(rr *store.RevisionRequest) (object.ID, error) {
 		return object.ID{}, fmt.Errorf("rr: base snapshot %s not found: %w", rr.BaseSnapshot, err)
 	}
 	return snap.TreeID, nil
-}
-
-// mergeBase returns the 3-way merge base tree for an RR. It uses the RR's
-// recorded base when the SOURCE snapshot descends from it; otherwise (a
-// non-descendant source — e.g. a root revision produced by a commit to a
-// non-existent branch) it re-bases onto the source's own parent. Without this,
-// a non-descendant source with base=∅ would make the merge treat every target
-// file the source lacks as a DELETION and wipe the branch.
-func (s *Service) mergeBase(rr *store.RevisionRequest, srcSnap *store.Snapshot) (object.ID, error) {
-	baseID, err := object.HexToID(rr.BaseSnapshot)
-	if err != nil {
-		return object.ID{}, fmt.Errorf("rr: bad base snapshot hash %q: %w", rr.BaseSnapshot, err)
-	}
-	if baseID.IsZero() {
-		// Target branch was empty at creation: use the source's own parent as the
-		// base (its true origin) when present.
-		if len(srcSnap.Parents) > 0 {
-			if ps, perr := s.repo.GetSnapshot(srcSnap.Parents[0]); perr == nil {
-				return ps.TreeID, nil
-			}
-		}
-		return object.ID{}, nil
-	}
-	if s.sourceDescendsFromBase(srcSnap, baseID) {
-		bs, berr := s.repo.GetSnapshot(baseID)
-		if berr != nil {
-			return object.ID{}, fmt.Errorf("rr: base snapshot %s not found: %w", rr.BaseSnapshot, berr)
-		}
-		return bs.TreeID, nil
-	}
-	// Source does NOT descend from the recorded base: re-base onto the source's
-	// own parent so the merge applies the source's CHANGES instead of replacing
-	// the whole tree (the non-descendant wipe).
-	if len(srcSnap.Parents) > 0 {
-		if ps, perr := s.repo.GetSnapshot(srcSnap.Parents[0]); perr == nil {
-			return ps.TreeID, nil
-		}
-	}
-	return object.ID{}, nil
-}
-
-// sourceDescendsFromBase reports whether `src` is `base` or a descendant of it,
-// walking the snapshot-parent DAG (bounded). A non-descendant means the RR's
-// recorded base is not a valid 3-way base.
-func (s *Service) sourceDescendsFromBase(src *store.Snapshot, base object.ID) bool {
-	if src == nil {
-		return false
-	}
-	seen := map[object.ID]bool{}
-	queue := []object.ID{src.RevisionHash}
-	for len(queue) > 0 && len(seen) < 100000 {
-		cur := queue[len(queue)-1]
-		queue = queue[:len(queue)-1]
-		if cur == base {
-			return true
-		}
-		if seen[cur] {
-			continue
-		}
-		seen[cur] = true
-		snap, err := s.repo.GetSnapshot(cur)
-		if err != nil {
-			continue
-		}
-		queue = append(queue, snap.Parents...)
-	}
-	return false
 }
 
 // treeOfSnapshot resolves a snapshot hash string to its tree id.

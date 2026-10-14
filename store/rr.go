@@ -30,12 +30,14 @@ type RevisionRequest struct {
 	SourceSnapshot string
 	BaseSnapshot   string
 	TargetBranch   string
-	State          string
-	Title          string
-	Body           string
-	AuthorID       *int64
-	Created        time.Time
-	Updated        time.Time
+	// Path scopes the RR to a subdirectory ("" = whole repo).
+	Path     string
+	State    string
+	Title    string
+	Body     string
+	AuthorID *int64
+	Created  time.Time
+	Updated  time.Time
 }
 
 // RRUpdate records one explicit re-pin of a Revision Request.
@@ -89,7 +91,7 @@ func (s *CentralStore) CreateRevisionRequest(repoID int64, rr *RevisionRequest) 
 	row := &revisionRequestRow{
 		RepoID: repoID, IID: iid,
 		SourceSnapshot: rr.SourceSnapshot,
-		BaseSnapshot:   rr.BaseSnapshot, TargetBranch: target, State: state,
+		BaseSnapshot:   rr.BaseSnapshot, TargetBranch: target, Path: rr.Path, State: state,
 		Title: rr.Title, Body: rr.Body, AuthorID: rr.AuthorID, Created: now, Updated: now,
 	}
 	if err := s.d.gdb.Create(row).Error; err != nil {
@@ -247,7 +249,7 @@ func rrFromRow(row *revisionRequestRow) *RevisionRequest {
 	return &RevisionRequest{
 		ID: row.ID, RepoID: row.RepoID, IID: row.IID,
 		SourceSnapshot: row.SourceSnapshot,
-		BaseSnapshot:   row.BaseSnapshot, TargetBranch: row.TargetBranch, State: row.State,
+		BaseSnapshot:   row.BaseSnapshot, TargetBranch: row.TargetBranch, Path: row.Path, State: row.State,
 		Title: row.Title, Body: row.Body, AuthorID: row.AuthorID,
 		Created: time.UnixMilli(row.Created), Updated: time.UnixMilli(row.Updated),
 	}
