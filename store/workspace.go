@@ -72,8 +72,8 @@ func LookupMarker(dir string) (*WorkspaceMarker, error) {
 
 // OpenStoreForMarker opens the central store that a workspace marker belongs to.
 // The marker must record a store location (Home for a sqlite store, or DSN as an
-// override). Unlike the legacy fallback, there is no silent reliance on the
-// process EASYVCS_HOME: an empty Home and DSN is treated as an invalid marker.
+// override). There is no silent reliance on the process EASYVCS_HOME: an
+// empty Home and DSN is treated as an invalid marker.
 func OpenStoreForMarker(m *WorkspaceMarker) (*CentralStore, error) {
 	if m == nil {
 		return nil, fmt.Errorf("workspace marker: nil")

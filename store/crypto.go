@@ -25,7 +25,7 @@ func secretKey() []byte {
 // encryptSecret encrypts plaintext secret with AES-GCM. If no key is configured
 // it returns plaintext (so behavior is unchanged unless EASYVCS_SECRET_KEY is
 // set). The result is base64 of (nonce||ciphertext), prefixed with "enc:" so we
-// can distinguish encrypted values from legacy plaintext on read.
+// can distinguish encrypted values from a plaintext value on read.
 func encryptSecret(s string) (string, error) {
 	key := secretKey()
 	if key == nil {
@@ -48,7 +48,7 @@ func encryptSecret(s string) (string, error) {
 }
 
 // decryptSecret reverses encryptSecret. Values without the "enc:" prefix are
-// treated as legacy plaintext and returned as-is (backward compatible). If no
+// treated as plaintext and returned as-is. If no
 // key is configured, encrypted values cannot be read and an error is returned
 // only if the value carried an "enc:" prefix.
 func decryptSecret(s string) (string, error) {

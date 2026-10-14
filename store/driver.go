@@ -114,7 +114,7 @@ func rootFor(kind, dsn string) string {
 }
 
 // sqlDialect adapts the storage layer over GORM. `db` is the underlying
-// *sql.DB (kept for SetWAL / legacy helpers); `gdb` is the GORM session used
+// *sql.DB (kept for SetWAL / advisory-lock helpers); `gdb` is the GORM session
 // for all model queries.
 type sqlDialect struct {
 	db   *sql.DB
@@ -133,7 +133,7 @@ func (s *CentralStore) DriverKind() string { return s.d.kind }
 // advisory locks for cross-replica coordination. The caller must not Close it.
 func (s *CentralStore) SQLDB() *sql.DB { return s.d.db }
 
-// Open opens the central store at the given SQLite file path (legacy helper).
+// Open opens the central store at the given SQLite file path.
 func Open(path string) (*CentralStore, error) {
 	return OpenDriver(DriverConfig{Kind: KindSQLite, DSN: path})
 }

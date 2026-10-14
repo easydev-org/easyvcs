@@ -126,7 +126,11 @@ func (revisionPathDirRow) TableName() string { return "revision_path_dirs" }
 
 // refs table.
 type refRow struct {
-	RepoID int64  `gorm:"primaryKey;not null"`
+	RepoID int64 `gorm:"primaryKey;not null"`
+	// Path is the SCOPE this ref belongs to ("" = the root scope). A ref lives
+	// in exactly one scope; the root scope's refs project down to sub-scopes
+	// (see docs/subrepo-scopes.md).
+	Path   string `gorm:"primaryKey;not null;default:''"`
 	Name   string `gorm:"primaryKey;not null"`
 	Kind   string `gorm:"not null"`
 	Target string `gorm:"not null"`
@@ -249,12 +253,6 @@ type rrMergeRow struct {
 
 func (rrMergeRow) TableName() string { return "rr_merge" }
 
-// NOTE: the legacy `merge_requests` / `mr_reviews` / `mr_comments` models were
-// removed here — collaboration is expressed as Revision Requests, whose
-// reviews/comments live in `rr_reviews` / `rr_comments` (store/rr_review.go).
-// An existing database may still carry the legacy tables; they are unused now
-// and intentionally not dropped (see the note near the TableName methods).
-
 // gitRevisionLinkRow records the weak-traceability link between an easyvcs
 // revision and a git commit produced when exporting/importing through the git
 // bridge. It is plain easyvcs metadata (never stored as a .git object); it lets
@@ -345,9 +343,5 @@ func (remoteRow) TableName() string     { return "remotes" }
 func (remoteRefRow) TableName() string  { return "remote_refs" }
 func (tokenRow) TableName() string      { return "tokens" }
 
-// NOTE: the historical `merge_requests` / `mr_reviews` / `mr_comments` tables
-// are no longer managed by this module. Collaboration is expressed as Revision
-// Requests, whose reviews/comments live in `rr_reviews` / `rr_comments`
-// (see store/rr_review.go). An existing database may still carry the legacy MR
-// tables; they are simply unused now and are intentionally not dropped (no
-// destructive migration).
+// Collaboration is expressed as Revision Requests, whose reviews/comments live
+// in `rr_reviews` / `rr_comments` (see store/rr_review.go).

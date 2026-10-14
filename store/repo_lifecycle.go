@@ -76,9 +76,7 @@ func (s *CentralStore) Delete(r RepoRef) error {
 		}
 	}
 	// Collaboration is Revision Requests, scoped to the repo: clean the RRs and
-	// their reviews/comments/updates/merge rows. (The legacy `merge_requests` /
-	// `mr_reviews` / `mr_comments` tables are no longer managed and are left
-	// alone — no destructive migration.)
+	// their reviews/comments/updates/merge rows.
 	rrIDs := s.d.gdb.Model(&revisionRequestRow{}).Select("id").Where("repo_id=?", repo.repoID)
 	for _, table := range []any{&rrReviewRow{}, &rrCommentRow{}, &rrUpdateRow{}, &rrMergeRow{}} {
 		if err := s.d.gdb.Where("rr_id IN (?)", rrIDs).Delete(table).Error; err != nil {

@@ -149,11 +149,16 @@ const (
 	RefTag    RefKind = "tag"
 )
 
-// Ref is a named pointer to a revision.
+// Ref is a named pointer to a revision, scoped to a PATH within the repository
+// ("" = the root scope). See docs/subrepo-scopes.md.
 type Ref struct {
 	Name   string
 	Kind   RefKind
 	Target string // revision id
+	// Path is the scope this ref belongs to ("" = root). A sub-scope ref is
+	// visible only within that path; a root ref projects down to every
+	// sub-scope that contains it.
+	Path string
 }
 
 // RepoStore is the repo-scoped persistence boundary used by the semantic layer.
