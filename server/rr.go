@@ -101,17 +101,17 @@ func (s *Server) requireMerge(next http.HandlerFunc) http.HandlerFunc {
 
 // mountRR registers the Revision Request routes on mux.
 func (s *Server) mountRR(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr", s.requirePropose(s.handleRRCreate))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/objects", s.requirePropose(s.handleRRObjects))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/rr", s.requireRepoAccess(false, s.handleRRList))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/rr/{iid}", s.requireRepoAccess(false, s.handleRRGet))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/rr/{iid}/diff", s.requireRepoAccess(false, s.handleRRDiff))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/update", s.requirePropose(s.handleRRUpdate))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/review", s.requirePropose(s.handleRRReview))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/comment", s.requirePropose(s.handleRRComment))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/resolve", s.requirePropose(s.handleRRResolve))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/merge", s.requireMerge(s.handleRRMerge))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/close", s.requireMerge(s.handleRRClose))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/rr", s.requirePropose(s.handleRRCreate))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/rr/objects", s.requirePropose(s.handleRRObjects))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/rr", s.requireRepoAccess(false, s.handleRRList))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/rr/{iid}", s.requireRepoAccess(false, s.handleRRGet))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/rr/{iid}/diff", s.requireRepoAccess(false, s.handleRRDiff))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/rr/{iid}/update", s.requirePropose(s.handleRRUpdate))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/rr/{iid}/review", s.requirePropose(s.handleRRReview))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/rr/{iid}/comment", s.requirePropose(s.handleRRComment))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/rr/{iid}/resolve", s.requirePropose(s.handleRRResolve))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/rr/{iid}/merge", s.requireMerge(s.handleRRMerge))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/rr/{iid}/close", s.requireMerge(s.handleRRClose))
 }
 
 // rrService opens the RR service for the request's repo.

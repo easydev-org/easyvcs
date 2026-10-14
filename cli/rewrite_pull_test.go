@@ -46,7 +46,7 @@ func TestRewriteIncrementalPullDeliversNewSnapshot(t *testing.T) {
 	if err := cs.EnsureNamespace(u.ID, "team"); err != nil {
 		t.Fatal(err)
 	}
-	remoteRepo, err := cs.Create(store.NSRef{Owner: u.ID, Name: "team" + "/" + "app"})
+	remoteRepo, err := cs.Create(store.NSRef{Owner: u.ID, Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestRewriteIncrementalPullDeliversNewSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	localRepo, err := lcs.Create(store.NSRef{Name: "team" + "/" + "app"})
+	localRepo, err := lcs.Create(store.NSRef{Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestClientHaveSetSkipsOnlyMatchingHashes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := cs.Create(store.NSRef{Name: "n" + "/" + "r"})
+	repo, err := cs.Create(store.NSRef{Name: "n-r"})
 	if err != nil {
 		t.Fatal(err)
 	}

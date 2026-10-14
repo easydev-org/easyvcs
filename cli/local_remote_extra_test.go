@@ -412,7 +412,7 @@ func TestMarkerWriteAndReadRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("EASYVCS_HOME", home)
 	m := &store.WorkspaceMarker{
-		Repo:            store.NSRef{Name: "n" + "/" + "r"},
+		Repo:            store.NSRef{Name: "n-r"},
 		CurrentRevision: "rev1",
 		Branch:          "main",
 		Home:            home,
@@ -428,7 +428,7 @@ func TestMarkerWriteAndReadRoundTrip(t *testing.T) {
 	if got.Home != home || got.DSN != "/tmp/custom.db" || got.Branch != "main" || got.CurrentRevision != "rev1" {
 		t.Fatalf("roundtrip mismatch: %+v", got)
 	}
-	if got.Repo.Name != "n/r" {
+	if got.Repo.Name != "n-r" {
 		t.Fatalf("repo mismatch: %+v", got.Repo)
 	}
 }

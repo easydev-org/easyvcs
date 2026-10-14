@@ -50,7 +50,7 @@ func seedRepo(t *testing.T, s *Server) {
 	if u, err := s.cs.GetUserByUsername("tester"); err == nil {
 		owner = u.ID
 	}
-	repo, err := s.cs.Create(store.NSRef{Owner: owner, Name: "team/app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: owner, Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestAdvertiseAndFetch(t *testing.T) {
 
 	// advertise
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/advertise", bytes.NewReader([]byte(`{}`)))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/advertise", bytes.NewReader([]byte(`{}`)))
 	mux.ServeHTTP(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("advertise: %d %s", rec.Code, rec.Body.String())
@@ -97,7 +97,7 @@ func TestAdvertiseAndFetch(t *testing.T) {
 
 	// fetch returns a bundle with the revision + ref
 	rec2 := httptest.NewRecorder()
-	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/fetch", bytes.NewReader([]byte(`{}`)))
+	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/fetch", bytes.NewReader([]byte(`{}`)))
 	mux.ServeHTTP(rec2, r2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("fetch: %d %s", rec2.Code, rec2.Body.String())
@@ -116,7 +116,7 @@ func TestPushDisallowsNonFastForward(t *testing.T) {
 	seedRepo(t, s)
 	mux := s.Router()
 
-	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	revs, _ := repo.ListRevisions()
 	// Identify root vs child by parent linkage: the root has no parents.
 	var childID, rootID string
@@ -138,7 +138,7 @@ func TestPushDisallowsNonFastForward(t *testing.T) {
 	fwd := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
 		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: childID}}}
 	payload, _ := transfer.CompressBundle(fwd)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
@@ -150,7 +150,7 @@ func TestPushDisallowsNonFastForward(t *testing.T) {
 	back := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
 		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: rootID}}}
 	payload2, _ := transfer.CompressBundle(back)
-	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload2))
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload2))
 	req2.Header.Set("Content-Encoding", "gzip")
 	req2.Header.Set("Authorization", "Bearer secret")
 	rec2 := httptest.NewRecorder()
@@ -163,13 +163,13 @@ func TestPushDisallowsNonFastForward(t *testing.T) {
 func TestPushFastForwardAllowed(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	revs, _ := repo.ListRevisions()
 	mainRef, _ := repo.GetRef("main")
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
 		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: mainRef.Target}}}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
@@ -182,7 +182,7 @@ func TestPushFastForwardAllowed(t *testing.T) {
 func TestPushAuthRequired(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	revs, _ := repo.ListRevisions()
 	mainRef, _ := repo.GetRef("main")
 
@@ -190,7 +190,7 @@ func TestPushAuthRequired(t *testing.T) {
 		b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
 			Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: mainRef.Target}}}
 		payload, _ := transfer.CompressBundle(b)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 		req.Header.Set("Content-Encoding", "gzip")
 		if auth != "" {
 			req.Header.Set("Authorization", "Bearer "+auth)
@@ -223,7 +223,7 @@ func TestEndToEndMockPushFetch(t *testing.T) {
 	// rev2 as the missing delta.
 	advertise := func() AdvertiseResp {
 		body := []byte(`{"have":["missing-none"]}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/advertise", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/advertise", bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		s.Router().ServeHTTP(rec, req)
 		var adv AdvertiseResp
@@ -236,7 +236,7 @@ func TestEndToEndMockPushFetch(t *testing.T) {
 	}
 
 	// Push a bundle that moves main forward (fast-forward) and verify 200.
-	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	revs, _ := repo.ListRevisions()
 	var childID string
 	for _, r := range revs {
@@ -254,7 +254,7 @@ func TestEndToEndMockPushFetch(t *testing.T) {
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
 		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: childID}}}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
@@ -266,7 +266,7 @@ func TestEndToEndMockPushFetch(t *testing.T) {
 	// Fetch a bundle and confirm it carries the pushed revision + ref.
 	fetchReq := []byte(`{}`)
 	frec := httptest.NewRecorder()
-	freq := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/fetch", bytes.NewReader(fetchReq))
+	freq := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/fetch", bytes.NewReader(fetchReq))
 	s.Router().ServeHTTP(frec, freq)
 	if frec.Code != http.StatusOK {
 		t.Fatalf("fetch: %d %s", frec.Code, frec.Body.String())
@@ -288,7 +288,7 @@ func (m *mockSink) Record(ev store.AuditEvent) { m.events = append(m.events, ev)
 func TestACLDeniesNonMemberWrite(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	revs, _ := repo.ListRevisions()
 	mainRef, _ := repo.GetRef("main")
 
@@ -296,7 +296,7 @@ func TestACLDeniesNonMemberWrite(t *testing.T) {
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
 		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: mainRef.Target}}}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("Authorization", "Bearer secret")
@@ -315,7 +315,7 @@ func TestACLDeniesNonMemberWrite(t *testing.T) {
 	if _, err := s.cs.CreateToken("secret-out", u2.ID, "write"); err != nil {
 		t.Fatal(err)
 	}
-	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req2.Header.Set("Content-Encoding", "gzip")
 	req2.Header.Set("Authorization", "Bearer secret-out")
 	rec2 := httptest.NewRecorder()
@@ -335,7 +335,7 @@ func TestAuditSinkRecordsDenied(t *testing.T) {
 	s := New(cs, &mockSink{})
 	seedRepo(t, s)
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/advertise", bytes.NewReader([]byte(`{}`)))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/advertise", bytes.NewReader([]byte(`{}`)))
 	s.Router().ServeHTTP(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("open advertise %d", rec.Code)

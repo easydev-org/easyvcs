@@ -26,7 +26,7 @@ func hostingTestServerWithDirs(t *testing.T, dirs ...string) (*Server, *http.Ser
 	if err := s.cs.EnsureNamespace(u.ID, "team"); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team/app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,12 +73,12 @@ func TestRefsScopeProjectionAPI(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend", "backend")
 
 	// Root refs.
-	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/refs", tok, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/refs", tok, nil)
 	if rec.Code != 200 || !refNamesIn(t, decode(t, rec), "refs")["main"] {
 		t.Fatalf("root refs = %d %s", rec.Code, rec.Body.String())
 	}
 	// frontend: main projects in.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/refs?path=frontend", tok, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/refs?path=frontend", tok, nil)
 	n := refNamesIn(t, decode(t, rec), "refs")
 	if !n["main"] {
 		t.Fatalf("main should project into frontend: %v", n)
@@ -88,7 +88,7 @@ func TestRefsScopeProjectionAPI(t *testing.T) {
 // A root branch whose tip lacks the dir does NOT project there.
 func TestRefsScopeNoProjectionWhenMissing(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend") // no backend/
-	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/refs?path=backend", tok, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/refs?path=backend", tok, nil)
 	n := refNamesIn(t, decode(t, rec), "refs")
 	if n["main"] {
 		t.Fatalf("main must not project into a non-existent dir: %v", n)
@@ -100,24 +100,24 @@ func TestCreateScopedBranchAPI(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend", "backend")
 
 	// Create a branch under frontend (path in the body).
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches", tok,
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", tok,
 		map[string]any{"name": "feature-x", "from": "main", "path": "frontend"})
 	if rec.Code != 200 {
 		t.Fatalf("create scoped branch = %d %s", rec.Code, rec.Body.String())
 	}
 	// The root listing does NOT show it.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/branches", tok, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches", tok, nil)
 	if refNamesIn(t, decode(t, rec), "branches")["feature-x"] {
 		t.Fatal("a scoped branch leaked into the root listing")
 	}
 	// The frontend listing shows main (projected) + feature-x (own).
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/branches?path=frontend", tok, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches?path=frontend", tok, nil)
 	n := refNamesIn(t, decode(t, rec), "branches")
 	if !n["main"] || !n["feature-x"] {
 		t.Fatalf("frontend branches = %v, want main + feature-x", n)
 	}
 	// A sibling scope does NOT see feature-x.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/branches?path=backend", tok, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches?path=backend", tok, nil)
 	if refNamesIn(t, decode(t, rec), "branches")["feature-x"] {
 		t.Fatal("a scoped branch leaked into a sibling scope")
 	}
@@ -128,22 +128,22 @@ func TestDeleteScopedBranchAPI(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend", "backend")
 	// Same branch name in two scopes.
 	for _, p := range []string{"frontend", "backend"} {
-		rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches", tok,
+		rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", tok,
 			map[string]any{"name": "shared", "from": "main", "path": p})
 		if rec.Code != 200 {
 			t.Fatalf("create %s: %d %s", p, rec.Code, rec.Body.String())
 		}
 	}
-	rec := hreq(mux, http.MethodDelete, "/api/v1/namespaces/team/app/branches/shared?path=frontend", tok, nil)
+	rec := hreq(mux, http.MethodDelete, "/api/v1/namespaces/team-app/branches/shared?path=frontend", tok, nil)
 	if rec.Code != 200 {
 		t.Fatalf("delete scoped branch = %d %s", rec.Code, rec.Body.String())
 	}
 	// frontend lost it; backend kept it.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/branches?path=frontend", tok, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches?path=frontend", tok, nil)
 	if refNamesIn(t, decode(t, rec), "branches")["shared"] {
 		t.Fatal("frontend branch was not deleted")
 	}
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/branches?path=backend", tok, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches?path=backend", tok, nil)
 	if !refNamesIn(t, decode(t, rec), "branches")["shared"] {
 		t.Fatal("backend branch was wrongly deleted")
 	}
@@ -152,7 +152,7 @@ func TestDeleteScopedBranchAPI(t *testing.T) {
 // refView surfaces the scope path when non-empty.
 func TestRefViewIncludesPath(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend")
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches", tok,
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", tok,
 		map[string]any{"name": "fe", "from": "main", "path": "frontend"})
 	var m map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &m)
@@ -167,12 +167,12 @@ func TestCommitWithPathLifts(t *testing.T) {
 	_, mux, tok, repo := hostingTestServerWithDirs(t, "frontend", "backend")
 
 	// A non-protected branch to lift onto (main is protected).
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches", tok,
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", tok,
 		map[string]any{"name": "feature", "from": "main"}); rec.Code != 200 {
 		t.Fatalf("create feature = %d %s", rec.Code, rec.Body.String())
 	}
 	// Commit a change to frontend/app.ts (path-relative), on feature.
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/commit", tok,
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", tok,
 		map[string]any{
 			"branch":  "feature",
 			"message": "edit frontend",
@@ -209,11 +209,11 @@ func TestCommitWithPathLifts(t *testing.T) {
 // A root commit (no path) still works exactly as before.
 func TestCommitWithoutPathUnchanged(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend")
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches", tok,
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", tok,
 		map[string]any{"name": "feature", "from": "main"}); rec.Code != 200 {
 		t.Fatalf("create feature = %d %s", rec.Code, rec.Body.String())
 	}
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/commit", tok,
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", tok,
 		map[string]any{
 			"branch":  "feature",
 			"message": "root edit",

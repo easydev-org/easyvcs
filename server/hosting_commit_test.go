@@ -15,7 +15,7 @@ import (
 // commitPost sends a /commit body to team/app and returns the recorder.
 func commitPost(t *testing.T, mux *http.ServeMux, token string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
-	return hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/commit", token, body)
+	return hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, body)
 }
 
 // newBranch creates a feature branch off the repo's main commit (a derived
@@ -52,7 +52,7 @@ func TestCommitCreateAndReadBack(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body.String())
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/tree?ref=feature/x&path=sub", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=feature/x&path=sub", token, nil)
 	if tr.Code != http.StatusOK {
 		t.Fatalf("tree: %d %s", tr.Code, tr.Body.String())
 	}
@@ -65,11 +65,11 @@ func TestCommitCreateAndReadBack(t *testing.T) {
 	if len(tv.Entries) != 1 || tv.Entries[0].Path != "sub/b.txt" {
 		t.Fatalf("tree entries = %+v, want sub/b.txt", tv.Entries)
 	}
-	bl := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/blob?ref=feature/x&path=a.txt", token, nil)
+	bl := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/blob?ref=feature/x&path=a.txt", token, nil)
 	if bl.Code != http.StatusOK || !has(bl.Body.String(), "hello") {
 		t.Fatalf("blob a.txt: %d %s", bl.Code, bl.Body.String())
 	}
-	mainTree := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/tree?ref=main", token, nil)
+	mainTree := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=main", token, nil)
 	if has(mainTree.Body.String(), "a.txt") {
 		t.Fatalf("main must be untouched: %s", mainTree.Body.String())
 	}
@@ -89,7 +89,7 @@ func TestCommitBinaryRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body.String())
 	}
-	rawRec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/raw?ref=feature/bin&path=blob.bin", token, nil)
+	rawRec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/raw?ref=feature/bin&path=blob.bin", token, nil)
 	if rawRec.Code != http.StatusOK {
 		t.Fatalf("raw: %d %s", rawRec.Code, rawRec.Body.String())
 	}
@@ -114,7 +114,7 @@ func TestCommitDelete(t *testing.T) {
 	}); rec.Code != http.StatusOK {
 		t.Fatalf("del: %d %s", rec.Code, rec.Body.String())
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/tree?ref=feature/del", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=feature/del", token, nil)
 	if has(tr.Body.String(), "gone.txt") {
 		t.Fatalf("gone.txt should be deleted: %s", tr.Body.String())
 	}
@@ -184,7 +184,7 @@ func TestCommitAmendAccumulates(t *testing.T) {
 	if got, _ := decode(t, rec)["revision_id"].(string); got != revID {
 		t.Fatalf("amend changed revision id: %s != %s", got, revID)
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/tree?ref=feature/amend", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=feature/amend", token, nil)
 	if !has(tr.Body.String(), "a.txt") || !has(tr.Body.String(), "b.txt") {
 		t.Fatalf("amend must accumulate both files: %s", tr.Body.String())
 	}
@@ -253,7 +253,7 @@ func TestCommitUnsafePathRejected(t *testing.T) {
 			t.Fatalf("unsafe path %q should be 400, got %d %s", p, rec.Code, rec.Body.String())
 		}
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/tree?ref=feature/unsafe", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=feature/unsafe", token, nil)
 	if has(tr.Body.String(), "escape.txt") {
 		t.Fatalf("unsafe commit must not land: %s", tr.Body.String())
 	}

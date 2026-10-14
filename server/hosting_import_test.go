@@ -62,7 +62,7 @@ func TestImportFromLocalRepo(t *testing.T) {
 	src := makeSourceBareRepo(t)
 	s, mux, token, _ := hostingTestServer(t)
 
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/imported/import", token, map[string]any{
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-imported/import", token, map[string]any{
 		"url": "file://" + src,
 	})
 	if rec.Code != http.StatusOK {
@@ -77,7 +77,7 @@ func TestImportFromLocalRepo(t *testing.T) {
 	}
 
 	// The imported content is readable at main.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/imported/blob?ref=main&path=src/main.go", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-imported/blob?ref=main&path=src/main.go", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("blob: %d %s", rec.Code, rec.Body.String())
 	}
@@ -86,7 +86,7 @@ func TestImportFromLocalRepo(t *testing.T) {
 	}
 
 	// The imported history has two commits.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/imported/log?ref=main", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-imported/log?ref=main", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("log: %d %s", rec.Code, rec.Body.String())
 	}
@@ -102,7 +102,7 @@ func TestImportRefusesExistingContent(t *testing.T) {
 	src := makeSourceBareRepo(t)
 	_, mux, token, _ := hostingTestServer(t) // team/app already has a main commit
 
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/import", token, map[string]any{
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/import", token, map[string]any{
 		"url": "file://" + src,
 	})
 	if rec.Code != http.StatusConflict {
@@ -117,7 +117,7 @@ func TestImportAuth(t *testing.T) {
 	s, mux, _, _ := hostingTestServer(t)
 
 	// Anonymous.
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/newone/import", "", map[string]any{"url": "file://" + src})
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-newone/import", "", map[string]any{"url": "file://" + src})
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous import = %d, want 401", rec.Code)
 	}
@@ -131,14 +131,15 @@ func TestImportAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Into an EXISTING repo the intruder has no role on: 403.
-	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/import", "intruder-token", map[string]any{"url": "file://" + src})
+	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/import", "intruder-token", map[string]any{"url": "file://" + src})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("non-owner import into existing repo = %d, want 403: %s", rec.Code, rec.Body.String())
 	}
-	// Into a NEW repo under another user's org: 409.
-	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team/newtwo/import", "intruder-token", map[string]any{"url": "file://" + src})
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("non-owner import into another org = %d, want 409: %s", rec.Code, rec.Body.String())
+	// Into a FRESH namespace: namespaces are flat (no owner hierarchy), so a
+	// brand-new name is claimable by the caller -> 200.
+	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/fresh-ns/import", "intruder-token", map[string]any{"url": "file://" + src})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import into a fresh namespace = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -147,7 +148,7 @@ func TestImportAuth(t *testing.T) {
 func TestImportSourceUnreachable(t *testing.T) {
 	_, mux, token, _ := hostingTestServer(t)
 
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/bad/import", token, map[string]any{
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-bad/import", token, map[string]any{
 		"url":   "file:///nonexistent/does/not/exist.git",
 		"token": "supersecret-token-value",
 	})
@@ -162,7 +163,7 @@ func TestImportSourceUnreachable(t *testing.T) {
 // TestImportRequiresURL: a missing url is 400.
 func TestImportRequiresURL(t *testing.T) {
 	_, mux, token, _ := hostingTestServer(t)
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/nourl/import", token, map[string]any{})
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-nourl/import", token, map[string]any{})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing url = %d, want 400", rec.Code)
 	}

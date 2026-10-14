@@ -242,12 +242,6 @@ func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"namespace": ns, "ok": true})
 }
 
-// handleCreateRepo2 creates a slash-named container ("{ns}/{name}").
-func (s *Server) handleCreateRepo2(w http.ResponseWriter, r *http.Request) {
-	// Reuse handleCreateRepo but with the joined name available via PathValue.
-	s.handleCreateRepo(w, r)
-}
-
 func (s *Server) handlePatchRepo(w http.ResponseWriter, r *http.Request) {
 	repo, ok := s.repo(w, r)
 	if !ok {

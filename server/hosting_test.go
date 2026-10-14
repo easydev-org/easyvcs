@@ -25,7 +25,7 @@ func hostingTestServer(t *testing.T) (*Server, *http.ServeMux, string, *store.Re
 	if err := s.cs.EnsureNamespace(u.ID, "team"); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team/app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +118,13 @@ func TestHostingUserOrgRepoLifecycle(t *testing.T) {
 
 	// bob creates his own container "boborg/tool" (a namespace; there is no
 	// separate repository entity under it).
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/boborg/tool", bobTok, map[string]any{"visibility": "private"}); rec.Code != http.StatusOK {
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/boborg-tool", bobTok, map[string]any{"visibility": "private"}); rec.Code != http.StatusOK {
 		t.Fatalf("create namespace: %d %s", rec.Code, rec.Body.String())
 	}
 
 	// Make alice's repo private so visibility filtering is observable (a public
 	// repo is visible to everyone by design).
-	if rec := hreq(mux, http.MethodPatch, "/api/v1/namespaces/team/app", token, map[string]any{"visibility": "private"}); rec.Code != http.StatusOK {
+	if rec := hreq(mux, http.MethodPatch, "/api/v1/namespaces/team-app", token, map[string]any{"visibility": "private"}); rec.Code != http.StatusOK {
 		t.Fatalf("privatize team/app: %d %s", rec.Code, rec.Body.String())
 	}
 
@@ -135,7 +135,7 @@ func TestHostingUserOrgRepoLifecycle(t *testing.T) {
 		t.Fatalf("bob should see 1 repo, got %v", repos)
 	}
 	first := repos[0].(map[string]any)
-	if first["namespace"] != "boborg/tool" {
+	if first["namespace"] != "boborg-tool" {
 		t.Fatalf("unexpected namespace %v", first)
 	}
 	// The list carries default_branch + private inline, so a client does not
@@ -148,7 +148,7 @@ func TestHostingUserOrgRepoLifecycle(t *testing.T) {
 	}
 
 	// GET repo meta.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/boborg/tool", bobTok, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/boborg-tool", bobTok, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get repo: %d", rec.Code)
 	}
@@ -157,7 +157,7 @@ func TestHostingUserOrgRepoLifecycle(t *testing.T) {
 	}
 
 	// PATCH visibility to public.
-	rec = hreq(mux, http.MethodPatch, "/api/v1/namespaces/boborg/tool", bobTok, map[string]any{"visibility": "public"})
+	rec = hreq(mux, http.MethodPatch, "/api/v1/namespaces/boborg-tool", bobTok, map[string]any{"visibility": "public"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("patch repo: %d %s", rec.Code, rec.Body.String())
 	}
@@ -166,12 +166,12 @@ func TestHostingUserOrgRepoLifecycle(t *testing.T) {
 	}
 
 	// DELETE the repo.
-	if rec := hreq(mux, http.MethodDelete, "/api/v1/namespaces/boborg/tool", bobTok, nil); rec.Code != http.StatusOK {
+	if rec := hreq(mux, http.MethodDelete, "/api/v1/namespaces/boborg-tool", bobTok, nil); rec.Code != http.StatusOK {
 		t.Fatalf("delete repo: %d %s", rec.Code, rec.Body.String())
 	}
 	// The repo is gone: a read is refused (403/404 — a missing repo does not
 	// leak its existence, so the ACL check denies before the 404).
-	if rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/boborg/tool", bobTok, nil); rec.Code != http.StatusNotFound && rec.Code != http.StatusForbidden {
+	if rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/boborg-tool", bobTok, nil); rec.Code != http.StatusNotFound && rec.Code != http.StatusForbidden {
 		t.Fatalf("deleted repo get: got %d, want 404/403", rec.Code)
 	}
 }
@@ -212,12 +212,12 @@ func TestHostingRefs(t *testing.T) {
 	_, mux, token, repo := hostingTestServer(t)
 
 	// Create a branch from main.
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches", token, map[string]any{"name": "feature", "from": "main"})
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", token, map[string]any{"name": "feature", "from": "main"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create branch: %d %s", rec.Code, rec.Body.String())
 	}
 	// Branches list includes it.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/branches", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches", token, nil)
 	names := map[string]bool{}
 	for _, b := range decode(t, rec)["branches"].([]any) {
 		names[b.(map[string]any)["name"].(string)] = true
@@ -227,18 +227,18 @@ func TestHostingRefs(t *testing.T) {
 	}
 
 	// Tag main (immutable).
-	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/tags", token, map[string]any{"name": "v1", "target": "main"})
+	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/tags", token, map[string]any{"name": "v1", "target": "main"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create tag: %d %s", rec.Code, rec.Body.String())
 	}
 	// Re-tagging the same name is refused (immutable).
-	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/tags", token, map[string]any{"name": "v1", "target": "main"})
+	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/tags", token, map[string]any{"name": "v1", "target": "main"})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("re-tag: got %d, want 409", rec.Code)
 	}
 
 	// Delete the branch.
-	if rec := hreq(mux, http.MethodDelete, "/api/v1/namespaces/team/app/branches/feature", token, nil); rec.Code != http.StatusOK {
+	if rec := hreq(mux, http.MethodDelete, "/api/v1/namespaces/team-app/branches/feature", token, nil); rec.Code != http.StatusOK {
 		t.Fatalf("delete branch: %d %s", rec.Code, rec.Body.String())
 	}
 	if _, err := repo.GetRef("feature"); err == nil {
@@ -269,7 +269,7 @@ func TestHostingBrowse(t *testing.T) {
 	}
 
 	// tree at main lists both files.
-	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/tree?ref=main", token, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=main", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("tree: %d %s", rec.Code, rec.Body.String())
 	}
@@ -279,7 +279,7 @@ func TestHostingBrowse(t *testing.T) {
 	}
 
 	// blob (text) returns content.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/blob?ref=main&path=README.md", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/blob?ref=main&path=README.md", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("blob: %d %s", rec.Code, rec.Body.String())
 	}
@@ -288,26 +288,26 @@ func TestHostingBrowse(t *testing.T) {
 	}
 
 	// blob (binary) is flagged, not inlined.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/blob?ref=main&path=img.bin", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/blob?ref=main&path=img.bin", token, nil)
 	if decode(t, rec)["binary"] != true {
 		t.Fatalf("binary blob not flagged: %v", decode(t, rec))
 	}
 
 	// raw returns the exact bytes.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/raw?ref=main&path=img.bin", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/raw?ref=main&path=img.bin", token, nil)
 	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), bin) {
 		t.Fatalf("raw bytes mismatch: %d %v", rec.Code, rec.Body.Bytes())
 	}
 
 	// log lists commits newest-first.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/log?ref=main&limit=10", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/log?ref=main&limit=10", token, nil)
 	commits := decode(t, rec)["commits"].([]any)
 	if len(commits) != 2 {
 		t.Fatalf("log commits = %v", commits)
 	}
 
 	// diff main~ (prev) -> main: README modified + img.bin added (binary).
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/diff?base="+prev.ID+"&head=main", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/diff?base="+prev.ID+"&head=main", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("diff: %d %s", rec.Code, rec.Body.String())
 	}
@@ -324,7 +324,7 @@ func TestHostingBrowse(t *testing.T) {
 	}
 
 	// commit detail.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/commit/"+rev2.ID, token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/commit/"+rev2.ID, token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body.String())
 	}
@@ -333,7 +333,7 @@ func TestHostingBrowse(t *testing.T) {
 	}
 
 	// blame attributes a README line to c2.
-	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/blame?ref=main&path=README.md", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/blame?ref=main&path=README.md", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("blame: %d %s", rec.Code, rec.Body.String())
 	}
@@ -357,24 +357,24 @@ func TestHostingPermissions(t *testing.T) {
 	}
 
 	// Non-owner PATCH/DELETE is refused.
-	if rec := hreq(mux, http.MethodPatch, "/api/v1/namespaces/team/app", bobTok, map[string]any{"description": "x"}); rec.Code != http.StatusForbidden {
+	if rec := hreq(mux, http.MethodPatch, "/api/v1/namespaces/team-app", bobTok, map[string]any{"description": "x"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("non-owner patch: got %d, want 403", rec.Code)
 	}
-	if rec := hreq(mux, http.MethodDelete, "/api/v1/namespaces/team/app", bobTok, nil); rec.Code != http.StatusForbidden {
+	if rec := hreq(mux, http.MethodDelete, "/api/v1/namespaces/team-app", bobTok, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("non-owner delete: got %d, want 403", rec.Code)
 	}
 
 	// Anonymous write is 401.
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches", "", map[string]any{"name": "x", "from": "main"}); rec.Code != http.StatusUnauthorized {
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", "", map[string]any{"name": "x", "from": "main"}); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anon write: got %d, want 401", rec.Code)
 	}
 
 	// Make the repo private; anonymous read then 403/404.
-	ownerTokRec := hreq(mux, http.MethodPatch, "/api/v1/namespaces/team/app", ownerTok, map[string]any{"visibility": "private"})
+	ownerTokRec := hreq(mux, http.MethodPatch, "/api/v1/namespaces/team-app", ownerTok, map[string]any{"visibility": "private"})
 	if ownerTokRec.Code != http.StatusOK {
 		t.Fatalf("owner patch: %d %s", ownerTokRec.Code, ownerTokRec.Body.String())
 	}
-	if rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app", "", nil); rec.Code != http.StatusForbidden && rec.Code != http.StatusNotFound {
+	if rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app", "", nil); rec.Code != http.StatusForbidden && rec.Code != http.StatusNotFound {
 		t.Fatalf("anon read private: got %d, want 403/404", rec.Code)
 	}
 }

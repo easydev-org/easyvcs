@@ -3,8 +3,8 @@
 // be embedded or run as a standalone binary (see cmd/server). Every route lives
 // under the /api/v1 prefix; the smart protocol is:
 //
-//	POST /api/v1/namespaces/{ns}/{name}/advertise   (read: repo read ACL)
-//	POST /api/v1/namespaces/{ns}/{name}/fetch       (read: repo read ACL)
+//	POST /api/v1/namespaces/{ns}/advertise   (read: repo read ACL)
+//	POST /api/v1/namespaces/{ns}/fetch       (read: repo read ACL)
 //	POST /api/v1/repos/{ns}/{name}/push        (write: repo ACL, non-fast-forward)
 //
 // The hosting surface (identity, orgs/repos, refs, browse) is in hosting.go and
@@ -349,9 +349,9 @@ func (s *Server) router() *http.ServeMux {
 	// Liveness/readiness probes: unauthenticated and unaudited (see health.go).
 	mux.HandleFunc("GET /api/v1/healthz", s.handleHealthz)
 	mux.HandleFunc("GET /api/v1/readyz", s.handleReadyz)
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/advertise", s.requireRepoAccess(false, s.handleAdvertise))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/fetch", s.requireRepoAccess(false, s.handleFetch))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/push", s.requireRepoAccess(true, s.handlePush))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/advertise", s.requireRepoAccess(false, s.handleAdvertise))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/fetch", s.requireRepoAccess(false, s.handleFetch))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/push", s.requireRepoAccess(true, s.handlePush))
 	s.mountRR(mux)
 	s.mountHosting(mux)
 	s.mountUI(mux)
@@ -361,13 +361,10 @@ func (s *Server) router() *http.ServeMux {
 // repo opens the NAMESPACE named by {ns} (the single container). A scope PATH
 // within it comes from the `?path=` query (or, for the git catch-all route, the
 // extra path segments) — see docs/namespace-container.md.
-// nsRefName builds the container name from {ns}/{name} path values.
+// nsRefName returns the container name from the {ns} path value (a namespace is
+// a SINGLE-segment name; the old "repository" is a ?path= scope within it).
 func nsRefName(r *http.Request) string {
-	n := r.PathValue("ns")
-	if x := r.PathValue("name"); x != "" {
-		n = n + "/" + x
-	}
-	return n
+	return r.PathValue("ns")
 }
 
 func (s *Server) repo(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {

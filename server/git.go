@@ -24,24 +24,23 @@ func isGitHTTPPath(path string) bool {
 //
 // The clone URL is `<server>/api/v1/repos/{ns}/{name}[/<subdir>...]`.
 func (s *Server) gitHandler(w http.ResponseWriter, r *http.Request) {
-	// Path is /api/v1/repos/{ns}/{name}/<rest>; {name} may carry a ".git" suffix
-	// and <rest> ends with "/info/refs" or "/git-upload-pack".
+	// Path is /api/v1/namespaces/{ns}/<rest>: {ns} is the container (single
+	// segment) and <rest> is "[<path...>/]info/refs|git-upload-pack". The scope
+	// path is the leading segments of <rest> before the protocol suffix.
 	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/namespaces/")
-	// {ns}/{name} name the container; any deeper segments are the scope path.
-	parts := strings.SplitN(trimmed, "/", 3)
-	if len(parts) < 3 {
+	parts := strings.SplitN(trimmed, "/", 2)
+	if len(parts) < 2 {
 		http.NotFound(w, r)
 		return
 	}
-	r.SetPathValue("ns", parts[0])
-	r.SetPathValue("name", strings.TrimSuffix(parts[1], ".git"))
-	rest := parts[2]
+	r.SetPathValue("ns", strings.TrimSuffix(parts[0], ".git"))
+	rest := parts[1]
 
-	// Go module vanity for a SUBDIRECTORY: `.../mono/pkg-a?go-get=1` tells `go`
+	// Go module vanity for a SUBDIRECTORY: `.../{ns}/pkg-a?go-get=1` tells `go`
 	// to clone this subdir as its own module.
 	if r.URL.Query().Get("go-get") == "1" {
 		host := r.Host
-		path := "/api/v1/namespaces/" + parts[0] + "/" + parts[1] + "/" + strings.Trim(rest, "/")
+		path := "/api/v1/namespaces/" + parts[0] + "/" + strings.Trim(rest, "/")
 		path = strings.TrimSuffix(path, ".git")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta name="go-import" content="%s%s git http://%s%s"></head><body>easyvcs</body></html>`,
@@ -49,11 +48,10 @@ func (s *Server) gitHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// `rest` is the path AFTER `{ns}/{name}/`. For the ROOT repo it is exactly
-	// "info/refs" / "git-upload-pack" (NO leading slash — the ServeMux pattern's
-	// trailing slash is consumed), while for a subdir it is "<subdir>/info/refs".
-	// So trim a LEADING slash first, then match the suffix; matching on
-	// "/info/refs" alone would 404 the root repo (the common `git clone` case).
+	// `rest` is the path AFTER `{ns}/`. For the ROOT it is exactly "info/refs" /
+	// "git-upload-pack" (no leading slash — the ServeMux pattern's trailing slash
+	// is consumed), while for a subdir it is "<subdir>/info/refs". Trim a LEADING
+	// slash first, then match the suffix.
 	rest = strings.TrimPrefix(rest, "/")
 	var sub string
 	isInfoRefs := false

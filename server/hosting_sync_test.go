@@ -71,7 +71,7 @@ func TestBranchSyncClean(t *testing.T) {
 	}
 	mainBefore, _ := ws.GetRef("main")
 
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/feat/sync", token, map[string]any{})
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/feat/sync", token, map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sync: %d %s", rec.Code, rec.Body.String())
 	}
@@ -128,7 +128,7 @@ func TestBranchSyncConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/feat/sync", token, map[string]any{})
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/feat/sync", token, map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sync: %d %s", rec.Code, rec.Body.String())
 	}
@@ -152,7 +152,7 @@ func TestBranchSyncConflict(t *testing.T) {
 	}
 
 	// /raw renders the conflict as marker text.
-	rrec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/raw?ref=feat&path=README.md", token, nil)
+	rrec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/raw?ref=feat&path=README.md", token, nil)
 	if rrec.Code != http.StatusOK {
 		t.Fatalf("raw: %d %s", rrec.Code, rrec.Body.String())
 	}
@@ -161,7 +161,7 @@ func TestBranchSyncConflict(t *testing.T) {
 		t.Fatalf("raw conflict should render markers, got %q", body)
 	}
 	// /blob also reads it back as text with conflict=true.
-	brec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/blob?ref=feat&path=README.md", token, nil)
+	brec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/blob?ref=feat&path=README.md", token, nil)
 	if brec.Code != http.StatusOK {
 		t.Fatalf("blob: %d %s", brec.Code, brec.Body.String())
 	}
@@ -197,7 +197,7 @@ func TestBranchSyncIdempotent(t *testing.T) {
 	}
 
 	// First sync integrates base.txt cleanly.
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/feat/sync", token, map[string]any{})
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/feat/sync", token, map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first sync: %d %s", rec.Code, rec.Body.String())
 	}
@@ -209,7 +209,7 @@ func TestBranchSyncIdempotent(t *testing.T) {
 	before, _ := repo.ListRevisions()
 
 	// Second sync: base already integrated -> up_to_date, no new revision.
-	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/feat/sync", token, map[string]any{})
+	rec = hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/feat/sync", token, map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("second sync: %d %s", rec.Code, rec.Body.String())
 	}
@@ -241,7 +241,7 @@ func TestBranchSyncUpToDate(t *testing.T) {
 	}
 	before, _ := repo.ListRevisions()
 
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/feat/sync", token, map[string]any{})
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/feat/sync", token, map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sync: %d %s", rec.Code, rec.Body.String())
 	}
@@ -264,22 +264,22 @@ func TestBranchSyncErrors(t *testing.T) {
 	_, mux, token, repo := syncTestRepo(t)
 
 	// base == branch -> 400.
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/main/sync", token, map[string]any{"base": "main"}); rec.Code != http.StatusBadRequest {
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/main/sync", token, map[string]any{"base": "main"}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("base==branch = %d, want 400", rec.Code)
 	}
 	// unknown branch -> 404.
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/nope/sync", token, map[string]any{}); rec.Code != http.StatusNotFound {
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/nope/sync", token, map[string]any{}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown branch = %d, want 404", rec.Code)
 	}
 	// unknown base -> 404.
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/main/sync", token, map[string]any{"base": "nope"}); rec.Code != http.StatusNotFound {
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/main/sync", token, map[string]any{"base": "nope"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown base = %d, want 404", rec.Code)
 	}
 	// protected TARGET (main) -> 403.
 	if err := repo.SetProtectedBranches([]string{"main"}); err != nil {
 		t.Fatal(err)
 	}
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/main/sync", token, map[string]any{"base": "feat"}); rec.Code != http.StatusForbidden {
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/main/sync", token, map[string]any{"base": "feat"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("protected target = %d, want 403", rec.Code)
 	}
 }
@@ -296,7 +296,7 @@ func TestBranchSyncAuth(t *testing.T) {
 	}
 
 	// Anonymous (no token) -> 401 (write requires a token).
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/feat/sync", "", map[string]any{}); rec.Code != http.StatusUnauthorized {
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/feat/sync", "", map[string]any{}); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous sync = %d, want 401", rec.Code)
 	}
 	// A second user with no role on team/app -> 403.
@@ -307,7 +307,7 @@ func TestBranchSyncAuth(t *testing.T) {
 	if _, err := s.cs.CreateToken("intruder-token", u2.ID, "write"); err != nil {
 		t.Fatal(err)
 	}
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/branches/feat/sync", "intruder-token", map[string]any{}); rec.Code != http.StatusForbidden {
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches/feat/sync", "intruder-token", map[string]any{}); rec.Code != http.StatusForbidden {
 		t.Fatalf("non-owner sync = %d, want 403", rec.Code)
 	}
 }

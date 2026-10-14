@@ -99,6 +99,9 @@ revisions / RR 查询按 `path` 过滤（`ListRefsIn` / `RevisionsTouching`）�
 
 **容器操作**（namespace 级，`?path=` 收窄到 scope）：
 
+`{ns}` is a SINGLE segment (the namespace name). A subdirectory (the old
+"repository") is a `?path=` scope, NOT a URL segment.
+
 ```
 GET    /api/v1/namespaces                          list
 POST   /api/v1/namespaces                          create
@@ -122,7 +125,7 @@ GET/PUT /api/v1/namespaces/{ns}/protected-branches
 **git 端点**（子路径即独立 git 仓库，`gitserver` 已支持 subpath）：
 
 ```
-git clone http://host/api/v1/namespaces/{ns}/{path...}
+git clone http://host/api/v1/namespaces/{ns}/{path...}  (git needs the path as a URL segment)
   e.g. .../api/v1/namespaces/easydev-org/easyagent/frontend
 ```
 

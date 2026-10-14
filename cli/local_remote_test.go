@@ -40,7 +40,7 @@ func TestLocalRemotePushFetchPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repoA, err := csA.Create(store.NSRef{Name: "team" + "/" + "app"})
+	repoA, err := csA.Create(store.NSRef{Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestLocalRemotePushFetchPull(t *testing.T) {
 	if _, err := transfer.Apply(target, bundle); err != nil {
 		t.Fatalf("push to local remote: %v", err)
 	}
-	repoA2, _ := csA.OpenRepo(store.NSRef{Name: "team" + "/" + "app"})
+	repoA2, _ := csA.OpenRepo(store.NSRef{Name: "team-app"})
 	mainA, err := repoA2.GetRef("main")
 	if err != nil || mainA == nil {
 		t.Fatalf("remote main missing after push: %v", err)

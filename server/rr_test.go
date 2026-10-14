@@ -20,7 +20,7 @@ func TestRRCreateDiffMergeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team/app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestRRCreateDiffMergeE2E(t *testing.T) {
 	}
 
 	// Create.
-	rec := post("/api/v1/namespaces/team/app/rr", map[string]any{
+	rec := post("/api/v1/namespaces/team-app/rr", map[string]any{
 		"source_snapshot": src.RevisionHash.String(), "target_branch": "main", "title": "add rr",
 	})
 	if rec.Code != http.StatusOK {
@@ -79,7 +79,7 @@ func TestRRCreateDiffMergeE2E(t *testing.T) {
 
 	// Diff (read).
 	rec = httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/app/rr/1/diff", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team-app/rr/1/diff", nil)
 	mux.ServeHTTP(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rr diff: %d %s", rec.Code, rec.Body.String())
@@ -92,7 +92,7 @@ func TestRRCreateDiffMergeE2E(t *testing.T) {
 	}
 
 	// Merge.
-	rec = post("/api/v1/namespaces/team/app/rr/1/merge", map[string]any{})
+	rec = post("/api/v1/namespaces/team-app/rr/1/merge", map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("merge rr: %d %s", rec.Code, rec.Body.String())
 	}
@@ -121,7 +121,7 @@ func TestRRRequiresAuth(t *testing.T) {
 	seedRepo(t, s)
 	mux := s.Router()
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/rr", bytes.NewReader([]byte(`{"source_snapshot":"x","title":"t"}`)))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/rr", bytes.NewReader([]byte(`{"source_snapshot":"x","title":"t"}`)))
 	mux.ServeHTTP(rec, r)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for anonymous rr create, got %d", rec.Code)
@@ -138,7 +138,7 @@ func TestRREmptyRepoDiffMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team/app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestRREmptyRepoDiffMerge(t *testing.T) {
 		return rec
 	}
 
-	rec := post("/api/v1/namespaces/team/app/rr", map[string]any{
+	rec := post("/api/v1/namespaces/team-app/rr", map[string]any{
 		"source_snapshot": src.RevisionHash.String(), "target_branch": "main", "title": "empty repo rr",
 	})
 	if rec.Code != http.StatusOK {
@@ -173,7 +173,7 @@ func TestRREmptyRepoDiffMerge(t *testing.T) {
 
 	// Diff must be 200 (not 500).
 	rec = httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/app/rr/1/diff", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team-app/rr/1/diff", nil)
 	r.Header.Set("Authorization", "Bearer secret")
 	mux.ServeHTTP(rec, r)
 	if rec.Code != http.StatusOK {
@@ -181,7 +181,7 @@ func TestRREmptyRepoDiffMerge(t *testing.T) {
 	}
 
 	// Merge must be 200 (not 500), and create main.
-	rec = post("/api/v1/namespaces/team/app/rr/1/merge", map[string]any{})
+	rec = post("/api/v1/namespaces/team-app/rr/1/merge", map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("merge on empty repo rr: %d %s", rec.Code, rec.Body.String())
 	}
@@ -200,7 +200,7 @@ func TestRRReviewCommentReadBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team/app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestRRReviewCommentReadBack(t *testing.T) {
 		return rec
 	}
 
-	rec := post("/api/v1/namespaces/team/app/rr", map[string]any{
+	rec := post("/api/v1/namespaces/team-app/rr", map[string]any{
 		"source_snapshot": src.RevisionHash.String(), "target_branch": "main", "title": "rr with discussion",
 	})
 	if rec.Code != http.StatusOK {
@@ -233,16 +233,16 @@ func TestRRReviewCommentReadBack(t *testing.T) {
 	}
 
 	// A review and a comment.
-	if rec := post("/api/v1/namespaces/team/app/rr/1/review", map[string]any{"state": "approved", "body": "lgtm"}); rec.Code != http.StatusOK {
+	if rec := post("/api/v1/namespaces/team-app/rr/1/review", map[string]any{"state": "approved", "body": "lgtm"}); rec.Code != http.StatusOK {
 		t.Fatalf("review: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := post("/api/v1/namespaces/team/app/rr/1/comment", map[string]any{"body": "nit here", "path": "README.md"}); rec.Code != http.StatusOK {
+	if rec := post("/api/v1/namespaces/team-app/rr/1/comment", map[string]any{"body": "nit here", "path": "README.md"}); rec.Code != http.StatusOK {
 		t.Fatalf("comment: %d %s", rec.Code, rec.Body.String())
 	}
 
 	// GET /rr/{iid} must return both.
 	grec := httptest.NewRecorder()
-	greq := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/app/rr/1", nil)
+	greq := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team-app/rr/1", nil)
 	greq.Header.Set("Authorization", "Bearer secret")
 	mux.ServeHTTP(grec, greq)
 	if grec.Code != http.StatusOK {
@@ -277,7 +277,7 @@ func TestRRCloseE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team" + "/" + "closer"})
+	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team-closer"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestRRCloseE2E(t *testing.T) {
 		mux.ServeHTTP(rec, r)
 		return rec
 	}
-	rec := post("/api/v1/namespaces/team/closer/rr", map[string]any{
+	rec := post("/api/v1/namespaces/team-closer/rr", map[string]any{
 		"source_snapshot": src.RevisionHash.String(), "target_branch": "main", "title": "close me",
 	})
 	if rec.Code != http.StatusOK {
@@ -323,7 +323,7 @@ func TestRRCloseE2E(t *testing.T) {
 	}
 
 	// Close it.
-	rec = post("/api/v1/namespaces/team/closer/rr/1/close", map[string]any{})
+	rec = post("/api/v1/namespaces/team-closer/rr/1/close", map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("close rr: %d %s", rec.Code, rec.Body.String())
 	}
@@ -335,14 +335,14 @@ func TestRRCloseE2E(t *testing.T) {
 	}
 
 	// Idempotent: closing again is still 200.
-	rec = post("/api/v1/namespaces/team/closer/rr/1/close", map[string]any{})
+	rec = post("/api/v1/namespaces/team-closer/rr/1/close", map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("re-close: %d %s", rec.Code, rec.Body.String())
 	}
 
 	// A closed RR stays readable.
 	rec = httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/closer/rr/1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team-closer/rr/1", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -350,7 +350,7 @@ func TestRRCloseE2E(t *testing.T) {
 	}
 
 	// A closed RR can no longer be merged.
-	rec = post("/api/v1/namespaces/team/closer/rr/1/merge", map[string]any{})
+	rec = post("/api/v1/namespaces/team-closer/rr/1/merge", map[string]any{})
 	if rec.Code == http.StatusOK {
 		t.Fatalf("closed rr must not merge, got %d %s", rec.Code, rec.Body.String())
 	}

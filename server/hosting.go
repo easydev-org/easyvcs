@@ -91,56 +91,50 @@ func (s *Server) mountHosting(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/namespaces", s.handleCreateOrg)
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}", s.requireRepoRead(s.handleGetRepo))
 	mux.HandleFunc("POST /api/v1/namespaces/{ns}", s.handleCreateRepo)
-	// A slash-named container ("team/seeded"): create with the 2-segment shape.
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}", s.handleCreateRepo2)
 	mux.HandleFunc("PATCH /api/v1/namespaces/{ns}", s.requireRepoAccess(true, s.handlePatchRepo))
 	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}", s.requireRepoAccess(true, s.handleDeleteRepo))
-	// Slash-named container ("team/app"): 2-segment metadata methods.
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}", s.requireRepoRead(s.handleGetRepo))
-	mux.HandleFunc("PATCH /api/v1/namespaces/{ns}/{name}", s.requireRepoAccess(true, s.handlePatchRepo))
-	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/{name}", s.requireRepoAccess(true, s.handleDeleteRepo))
 
 	// M3 refs.
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/refs", s.requireRepoAccess(false, s.handleListRefs))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/branches", s.requireRepoAccess(false, s.handleListBranches))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/branches", s.requireRepoAccess(true, s.handleCreateBranch))
-	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/{name}/branches/{branch}", s.requireRepoAccess(true, s.handleDeleteBranch))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/tags", s.requireRepoAccess(false, s.handleListTags))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/tags", s.requireRepoAccess(true, s.handleCreateTag))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/refs", s.requireRepoAccess(false, s.handleListRefs))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/branches", s.requireRepoAccess(false, s.handleListBranches))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/branches", s.requireRepoAccess(true, s.handleCreateBranch))
+	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/branches/{branch}", s.requireRepoAccess(true, s.handleDeleteBranch))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/tags", s.requireRepoAccess(false, s.handleListTags))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/tags", s.requireRepoAccess(true, s.handleCreateTag))
 
 	// M3c branch sync: integrate a base branch into a feature branch.
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/branches/{branch}/sync", s.requireRepoAccess(true, s.handleBranchSync))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/branches/{branch}/sync", s.requireRepoAccess(true, s.handleBranchSync))
 
 	// M3b commit (no working copy): apply a file-op set to a non-default branch.
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/commit", s.requireRepoAccess(true, s.handleCommitFiles))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/commit", s.requireRepoAccess(true, s.handleCommitFiles))
 	// M3b snapshot (no working copy): build a revision + snapshot, move NO ref.
 	// PROPOSE level (developer+): the "propose from a sandbox" primitive feeding
 	// POST /rr {source_snapshot}.
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/snapshot", s.requirePropose(s.handleSnapshot))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/snapshot", s.requirePropose(s.handleSnapshot))
 	// M3c import: seed a repository from an external git repository (owner).
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/import", s.handleImport)
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/import", s.handleImport)
 
 	// Branch protection (owner-managed).
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/protected-branches", s.requireRepoAccess(false, s.handleGetProtectedBranches))
-	mux.HandleFunc("PUT /api/v1/namespaces/{ns}/{name}/protected-branches", s.requireRepoAccess(true, s.handleSetProtectedBranches))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/protected-branches", s.requireRepoAccess(false, s.handleGetProtectedBranches))
+	mux.HandleFunc("PUT /api/v1/namespaces/{ns}/protected-branches", s.requireRepoAccess(true, s.handleSetProtectedBranches))
 	// push mirrors (owner-managed; list is read).
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/push-mirrors", s.requireRepoAccess(false, s.handleListPushMirrors))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/push-mirrors", s.requireRepoAccess(true, s.handleCreatePushMirror))
-	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/{name}/push-mirrors/{mirror}", s.requireRepoAccess(true, s.handleDeletePushMirror))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/push-mirrors/{mirror}/sync", s.requireRepoAccess(true, s.handleSyncPushMirror))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/push-mirrors", s.requireRepoAccess(false, s.handleListPushMirrors))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/push-mirrors", s.requireRepoAccess(true, s.handleCreatePushMirror))
+	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/push-mirrors/{mirror}", s.requireRepoAccess(true, s.handleDeletePushMirror))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/push-mirrors/{mirror}/sync", s.requireRepoAccess(true, s.handleSyncPushMirror))
 
 	// M4 browse.
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/tree", s.requireRepoAccess(false, s.handleTree))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/blob", s.requireRepoAccess(false, s.handleBlob))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/raw", s.requireRepoAccess(false, s.handleRaw))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/log", s.requireRepoAccess(false, s.handleLog))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/commit/{sha}", s.requireRepoAccess(false, s.handleCommit))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/diff", s.requireRepoAccess(false, s.handleDiff))
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/blame", s.requireRepoAccess(false, s.handleBlame))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/tree", s.requireRepoAccess(false, s.handleTree))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/blob", s.requireRepoAccess(false, s.handleBlob))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/raw", s.requireRepoAccess(false, s.handleRaw))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/log", s.requireRepoAccess(false, s.handleLog))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/commit/{sha}", s.requireRepoAccess(false, s.handleCommit))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/diff", s.requireRepoAccess(false, s.handleDiff))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/blame", s.requireRepoAccess(false, s.handleBlame))
 	// archive/{file} where {file} = "<ref>.tar.gz" (see handleArchive).
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/archive/{file}", s.requireRepoAccess(false, s.handleArchive))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/archive/{file}", s.requireRepoAccess(false, s.handleArchive))
 	// A SUBDIRECTORY as a (recursive) repository: its refs + history, indexed.
-	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/subrepo", s.requireRepoAccess(false, s.handleSubRepo))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/subrepo", s.requireRepoAccess(false, s.handleSubRepo))
 
 	// M5 git smart HTTP (READ-ONLY: clone/fetch). A standard `git clone
 	// <server>/api/v1/repos/{ns}/{name}[/<subdir>...]` works, so package managers
