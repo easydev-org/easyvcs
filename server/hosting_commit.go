@@ -37,10 +37,6 @@ type commitReq struct {
 	Author     *store.Author  `json:"author"`
 	Parents    []string       `json:"parents"`
 	Files      []commitFileOp `json:"files"`
-	// Path scopes the commit to a SUBDIRECTORY (docs/subrepo-scopes.md §5): the
-	// file ops are relative to that dir and are LIFTED onto the root branch —
-	// the new root revision touches only that subtree. Empty = a normal commit.
-	Path string `json:"path"`
 }
 
 // handleCommitFiles applies a set of file operations to a NON-default branch
@@ -114,8 +110,9 @@ func (s *Server) handleCommitFiles(w http.ResponseWriter, r *http.Request) {
 	var snap *store.Snapshot
 	conflict := ""
 	// Sub-repo scope: LIFT the (scope-relative) file ops onto the root branch.
-	// The new root revision touches only the subtree at req.Path.
-	if scope := strings.Trim(strings.TrimSpace(req.Path), "/"); scope != "" {
+	// The SCOPE is always the ?path= query; the new root revision touches only
+	// that subtree.
+	if scope := scopePath(r); scope != "" {
 		if req.RevisionID != "" {
 			writeErr(w, http.StatusBadRequest, errors.New("revision_id (amend) is not supported with path"))
 			return

@@ -99,9 +99,9 @@ func TestRefsScopeNoProjectionWhenMissing(t *testing.T) {
 func TestCreateScopedBranchAPI(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend", "backend")
 
-	// Create a branch under frontend (path in the body).
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", tok,
-		map[string]any{"name": "feature-x", "from": "main", "path": "frontend"})
+	// Create a branch under frontend (the SCOPE is the ?path= query).
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches?path=frontend", tok,
+		map[string]any{"name": "feature-x", "from": "main"})
 	if rec.Code != 200 {
 		t.Fatalf("create scoped branch = %d %s", rec.Code, rec.Body.String())
 	}
@@ -128,8 +128,8 @@ func TestDeleteScopedBranchAPI(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend", "backend")
 	// Same branch name in two scopes.
 	for _, p := range []string{"frontend", "backend"} {
-		rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", tok,
-			map[string]any{"name": "shared", "from": "main", "path": p})
+		rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches?path="+p, tok,
+			map[string]any{"name": "shared", "from": "main"})
 		if rec.Code != 200 {
 			t.Fatalf("create %s: %d %s", p, rec.Code, rec.Body.String())
 		}
@@ -152,8 +152,8 @@ func TestDeleteScopedBranchAPI(t *testing.T) {
 // refView surfaces the scope path when non-empty.
 func TestRefViewIncludesPath(t *testing.T) {
 	_, mux, tok, _ := hostingTestServerWithDirs(t, "frontend")
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", tok,
-		map[string]any{"name": "fe", "from": "main", "path": "frontend"})
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches?path=frontend", tok,
+		map[string]any{"name": "fe", "from": "main"})
 	var m map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &m)
 	if m["path"] != "frontend" {
@@ -172,11 +172,10 @@ func TestCommitWithPathLifts(t *testing.T) {
 		t.Fatalf("create feature = %d %s", rec.Code, rec.Body.String())
 	}
 	// Commit a change to frontend/app.ts (path-relative), on feature.
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", tok,
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit?path=frontend", tok,
 		map[string]any{
 			"branch":  "feature",
 			"message": "edit frontend",
-			"path":    "frontend",
 			"files":   []map[string]any{{"path": "app.ts", "operation": "create", "content": "v2\n"}},
 		})
 	if rec.Code != 200 {

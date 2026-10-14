@@ -11,7 +11,11 @@ import (
 
 // ---- M3: refs ----
 
-// scopePath reads the ?path= query (a sub-repo scope). "" = the root scope.
+// scopePath is the ONE way a request names its scope: the ?path= query is a
+// repo-relative directory ("" = the root scope). Every scoped endpoint —
+// refs/branches/tags, commit/snapshot, rr, and the browse views (tree/blob/raw/
+// log/blame) — reads the scope from HERE, so there is a single coordinate
+// system and a single parameter (docs/namespace-container.md).
 func scopePath(r *http.Request) string {
 	return strings.Trim(strings.TrimSpace(r.URL.Query().Get("path")), "/")
 }
@@ -68,9 +72,6 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeJSONBody[struct {
 		Name string `json:"name"`
 		From string `json:"from"`
-		// Path scopes the branch to a sub-repo ("" = root). May also be given as
-		// ?path= (docs/subrepo-scopes.md).
-		Path string `json:"path"`
 	}](r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -80,10 +81,9 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
-	path := strings.Trim(strings.TrimSpace(req.Path), "/")
-	if path == "" {
-		path = scopePath(r)
-	}
+	// The SCOPE is always the ?path= query (docs/subrepo-scopes.md): one
+	// concept, one place.
+	path := scopePath(r)
 	ws := revision.NewWorkspace(repo)
 	// Idempotent: an existing branch (in this scope) is returned unchanged.
 	if cur, err := ws.GetRefIn(path, req.Name); err == nil && cur != nil && cur.Kind == store.RefBranch {
