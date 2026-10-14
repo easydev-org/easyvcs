@@ -29,6 +29,33 @@ func cmdLog(c *ctx) {
 	}
 }
 
+// cmdLogScope prints the revisions that touched a SUBDIRECTORY (its projected
+// history), newest first — powered by the path index, so it is O(revisions
+// under the path), not O(all). docs/subrepo-scopes.md §6/§8.
+func cmdLogScope(c *ctx, scope string) {
+	repo, _, err := c.loadRepo()
+	if err != nil {
+		c.fatal("log:", err)
+	}
+	ws := revision.NewWorkspace(repo)
+	ids, err := repo.RevisionsTouching(scope)
+	if err != nil {
+		c.fatal("log:", err)
+	}
+	for _, id := range ids {
+		rev, err := repo.GetRevision(id)
+		if err != nil {
+			continue
+		}
+		snap, err := ws.GetSnapshot(rev.Hash)
+		if err != nil {
+			continue
+		}
+		fmt.Printf("%s  %s\n", short(rev.ID), short(snap.RevisionHash.String()))
+		fmt.Printf("    %s\n", snap.Description)
+	}
+}
+
 // cmdLogPath reports the revisions that modified a given path, along with the
 // count. It walks the DAG from the current revision upward and filters using
 // each revision's ChangedPaths (cheap), then compares blob hashes to confirm

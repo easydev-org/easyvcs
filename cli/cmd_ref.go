@@ -42,6 +42,9 @@ func cmdBranch(c *ctx) {
 	if err != nil {
 		c.fatal("branch:", err)
 	}
+	// A scoped branch lives in a SUBDIRECTORY's scope (docs/subrepo-scopes.md §4):
+	// it is visible only there, never up to the root.
+	scope := scopeFlag(args)
 
 	// A branch always owns a distinct revision id so an in-place amend on one
 	// branch never mutates a revision shared by another branch. Creating a FRESH
@@ -51,7 +54,7 @@ func cmdBranch(c *ctx) {
 	// from --message (or is inherited from the source); auto_commit finalizes an
 	// uncommitted fork.
 	var target string
-	if cur, cerr := ws.GetRef(name); cerr == nil && cur != nil && cur.Kind == store.RefBranch {
+	if cur, cerr := ws.GetRefIn(scope, name); cerr == nil && cur != nil && cur.Kind == store.RefBranch {
 		// Branch already exists and owns its derived target: no-op.
 		target = cur.Target
 	} else {
@@ -61,7 +64,7 @@ func cmdBranch(c *ctx) {
 		}
 		target = ch.ID
 	}
-	r, err := ws.SetRef(name, store.RefBranch, target)
+	r, err := ws.SetRefIn(scope, name, store.RefBranch, target)
 	if err != nil {
 		c.fatal("branch:", err)
 	}
@@ -78,15 +81,20 @@ func cmdTag(c *ctx) {
 		c.fatal("tag:", err)
 	}
 	if len(os.Args) < 4 {
-		c.fatal("usage: tag <name> <revision>")
+		c.fatal("usage: tag <name> <revision> [--path <scope>]")
 	}
 	ws := revision.NewWorkspace(repo)
+	scope := scopeFlag(os.Args[2:])
 	// A tag is immutable: re-tagging an existing name is rejected by SetRef.
-	r, err := ws.SetRef(os.Args[2], store.RefTag, os.Args[3])
+	r, err := ws.SetRefIn(scope, os.Args[2], store.RefTag, os.Args[3])
 	if err != nil {
 		c.fatal("tag:", err)
 	}
-	fmt.Printf("tag %s -> revision %s\n", r.Name, short(r.Target))
+	if scope != "" {
+		fmt.Printf("tag %s@%s -> revision %s\n", r.Name, scope, short(r.Target))
+	} else {
+		fmt.Printf("tag %s -> revision %s\n", r.Name, short(r.Target))
+	}
 }
 
 func cmdRefs(c *ctx) {
@@ -99,6 +107,10 @@ func cmdRefs(c *ctx) {
 		c.fatal("refs:", err)
 	}
 	for _, r := range refs {
-		fmt.Printf("%s  %s -> revision %s\n", r.Kind, r.Name, short(r.Target))
+		if r.Path != "" {
+			fmt.Printf("%s  %s@%s -> revision %s\n", r.Kind, r.Name, r.Path, short(r.Target))
+		} else {
+			fmt.Printf("%s  %s -> revision %s\n", r.Kind, r.Name, short(r.Target))
+		}
 	}
 }

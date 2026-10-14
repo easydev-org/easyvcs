@@ -17,10 +17,12 @@ type scanResult struct {
 	content map[object.ID][]byte
 }
 
-// scanTreeFromFS builds an in-memory Tree from a directory WITHOUT persisting
-// any objects to the store. Blob content is kept in a side map so the caller
-// can produce file changes. Ignore files are honored.
-func scanTreeFromFS(dir string, m *ignore.Matcher) (*scanResult, error) {
+// scanTreeFromFS builds a Tree from a directory, persisting TREE objects (but
+// not blobs — their content is kept in a side map). Subtrees MUST be persisted:
+// the diff step reads tree entries back from the store, so an in-memory-only
+// subtree would be invisible and the whole directory silently dropped. Ignore
+// files are honored.
+func scanTreeFromFS(w *Workspace, dir string, m *ignore.Matcher) (*scanResult, error) {
 	res := &scanResult{content: map[object.ID][]byte{}}
 	var walk func(dir string, relPrefix string) (*object.Tree, error)
 	walk = func(dir string, relPrefix string) (*object.Tree, error) {
@@ -44,7 +46,14 @@ func scanTreeFromFS(dir string, m *ignore.Matcher) (*scanResult, error) {
 				if err != nil {
 					return nil, err
 				}
-				tree.Entries[name] = object.Entry{Name: name, Kind: object.KindTree, ID: sub.ID()}
+				// PERSIST the subtree: the diff step (diffSpecs) reads tree
+				// entries back from the store, so an in-memory-only tree would be
+				// invisible there and the whole directory silently dropped.
+				subID, err := w.writeTree(sub)
+				if err != nil {
+					return nil, err
+				}
+				tree.Entries[name] = object.Entry{Name: name, Kind: object.KindTree, ID: subID}
 				continue
 			}
 			data, err := os.ReadFile(full)
@@ -84,7 +93,7 @@ func (w *Workspace) ComputeChangesFromDir(parentHash object.ID, dir string) ([]F
 	if err != nil {
 		return nil, fmt.Errorf("load ignore rules: %w", err)
 	}
-	work, err := scanTreeFromFS(dir, m)
+	work, err := scanTreeFromFS(w, dir, m)
 	if err != nil {
 		return nil, err
 	}

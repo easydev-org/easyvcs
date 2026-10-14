@@ -133,7 +133,8 @@ func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	refs, err := repo.ListRefs()
+	// A ?path= scopes the listing (projected tags + the scope's own).
+	refs, err := revision.NewWorkspace(repo).ListRefsIn(scopePath(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -156,6 +157,8 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeJSONBody[struct {
 		Name   string `json:"name"`
 		Target string `json:"target"`
+		// Path scopes the tag to a subdirectory ("" = root).
+		Path string `json:"path"`
 	}](r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -165,14 +168,18 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
+	path := strings.Trim(strings.TrimSpace(req.Path), "/")
+	if path == "" {
+		path = scopePath(r)
+	}
 	ws := revision.NewWorkspace(repo)
 	targetID, err := resolveRefRevisionID(repo, ws, req.Target)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	// A tag is immutable: SetRef refuses to move an existing tag.
-	ref, err := ws.SetRef(req.Name, store.RefTag, targetID)
+	// A tag is immutable: SetRef refuses to move an existing tag (within its scope).
+	ref, err := ws.SetRefIn(path, req.Name, store.RefTag, targetID)
 	if err != nil {
 		writeErr(w, http.StatusConflict, err)
 		return

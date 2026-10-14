@@ -46,6 +46,42 @@ func cmdCommit(c *ctx) {
 		c.fatal("commit:", err)
 	}
 
+	// Sub-repo scope: `commit --path <scope>` LIFTS the scope-relative changes
+	// onto the ROOT branch (docs/subrepo-scopes.md §5). Only the subtree at
+	// <scope> is touched; the rest of the repo is untouched. The working-dir
+	// changes are filtered to that subtree and rewritten scope-relative.
+	if scope := scopeFlag(os.Args[2:]); scope != "" {
+		scoped := make([]revision.FileChangeSpec, 0, len(changes))
+		for _, ch := range changes {
+			rel, ok := stripScope(scope, ch.Path)
+			if !ok {
+				continue
+			}
+			scoped = append(scoped, revision.FileChangeSpec{Path: rel, Content: ch.Content, Delete: ch.Delete})
+		}
+		if len(scoped) == 0 {
+			c.fatal("commit:", fmt.Errorf("no changes under %q to lift", scope))
+		}
+		branch := marker.Branch
+		if branch == "" {
+			branch = "main"
+		}
+		msg := commitMessage(os.Args[2:], "commit")
+		snap, ch, err := ws.Lift(branch, scope, scoped, msg, authorIdentity(os.Args[2:]))
+		if err != nil {
+			c.fatal("commit:", err)
+		}
+		fmt.Printf("lifted %d change(s) into %s -> revision %s -> snapshot %s\n", len(scoped), scope, short(ch.ID), short(snap.RevisionHash.String()))
+		marker.CurrentRevision = ch.ID
+		if err := store.WriteMarker(".", marker); err != nil {
+			c.fatal("commit:", err)
+		}
+		if err := c.cs.PutWorkspace(&store.WorkspaceRow{Path: ".", Repo: marker.Repo, CurrentRevision: ch.ID, Branch: marker.Branch}); err != nil {
+			c.fatal("commit: record workspace:", err)
+		}
+		return
+	}
+
 	// Atomic commit from the computed changes (same code path as the server
 	// /files API). Default amends onto the current revision (revision_id stable);
 	// --new creates a fresh revision chain from the current tip.

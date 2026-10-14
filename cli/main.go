@@ -228,6 +228,11 @@ func main() {
 	case "amend":
 		cmdAmend(c)
 	case "log":
+		// log --path <scope>: the subdirectory's projected history.
+		if sc := scopeFlag(os.Args[2:]); sc != "" {
+			cmdLogScope(c, sc)
+			return
+		}
 		// log [--count] <path>: report revisions that modified a file.
 		if len(os.Args) >= 3 {
 			count := false
