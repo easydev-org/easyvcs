@@ -21,14 +21,44 @@ var FileNames = []string{".gitignore", ".vcsignore"}
 // excluded from a snapshot/build.
 type Matcher struct {
 	ignores []*ignore.GitIgnore
-	dirs    []string // root-relative dir prefix for each ignore layer
+	// dirs are the ABSOLUTE directories each layer's patterns are relative to,
+	// ordered outermost-first (ancestors above the scan root, then the scan
+	// root and its descendants). scanRoot is the absolute scan root that
+	// Ignored's relative paths are anchored at.
+	dirs     []string
+	scanRoot string
 }
 
-// New loads ignore files starting at root, walking every subdirectory and
-// building a layered matcher. Later (deeper) files take precedence.
+// WorkspaceMarkerFile names the workspace pointer file. Its presence marks a
+// directory as a workspace (namespace) root: the UPWARD ignore walk stops there.
+// Kept as a literal here so the ignore package has no dependency on store.
+const WorkspaceMarkerFile = ".easyvcs-workspace"
+
+// New loads ignore files for the tree rooted at root, in git order:
+//
+//  1. UPWARD: the ignore files in root's ANCESTORS, from the outermost down to
+//     root — but only while still INSIDE the workspace (the walk stops at the
+//     directory holding the workspace marker, or immediately if none is found,
+//     so unrelated parent directories are never consulted).
+//  2. DOWNWARD: every .gitignore/.vcsignore at root and below.
+//
+// Later (deeper) layers take precedence, matching git's last-match-wins.
 func New(root string) (*Matcher, error) {
-	m := &Matcher{}
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	m := &Matcher{scanRoot: abs}
+
+	// 1. Ancestor layers (outermost first), stopping at the workspace root.
+	for _, l := range ancestorLayers(abs) {
+		if err := m.addLayer(l.dir, l.file); err != nil {
+			return nil, err
+		}
+	}
+
+	// 2. Downward layers from the scan root.
+	err = filepath.Walk(abs, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -39,21 +69,65 @@ func New(root string) (*Matcher, error) {
 		if !isIgnoreFile(name) {
 			return nil
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		// Load this file's patterns; MatchesPath expects the matcher to be
-		// relative to the ignore file's directory. glob lines are relative.
-		lines, err := readLines(path)
-		if err != nil {
-			return err
-		}
-		m.ignores = append(m.ignores, ignore.CompileIgnoreLines(lines...))
-		m.dirs = append(m.dirs, filepath.ToSlash(filepath.Dir(rel)))
-		return nil
+		return m.addLayer(filepath.Dir(path), path)
 	})
 	return m, err
+}
+
+// addLayer compiles the ignore file at filePath (whose patterns are relative to
+// dir) and appends it as the next (deeper) layer.
+func (m *Matcher) addLayer(dir, filePath string) error {
+	lines, err := readLines(filePath)
+	if err != nil {
+		return err
+	}
+	m.ignores = append(m.ignores, ignore.CompileIgnoreLines(lines...))
+	m.dirs = append(m.dirs, dir)
+	return nil
+}
+
+// ignoreLayer is one ignore file: its directory (absolute) and file path.
+type ignoreLayer struct{ dir, file string }
+
+// ancestorLayers returns the ancestor layers of root, OUTERMOST first, walking
+// up from root's parent only while inside the workspace (stopping at the
+// directory that holds the workspace marker). If no marker is found, no
+// ancestors are returned — an unrelated parent tree is never consulted.
+func ancestorLayers(root string) []ignoreLayer {
+	var chain []string
+	cur := filepath.Dir(root)
+	foundWorkspace := false
+	for {
+		chain = append(chain, cur)
+		if fileExists(filepath.Join(cur, WorkspaceMarkerFile)) {
+			foundWorkspace = true
+			break
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break // reached the filesystem root
+		}
+		cur = parent
+	}
+	if !foundWorkspace {
+		return nil
+	}
+	// Outermost-first, keeping only layers that actually carry an ignore file.
+	var out []ignoreLayer
+	for i := len(chain) - 1; i >= 0; i-- {
+		for _, f := range FileNames {
+			p := filepath.Join(chain[i], f)
+			if fileExists(p) {
+				out = append(out, ignoreLayer{dir: chain[i], file: p})
+			}
+		}
+	}
+	return out
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // NewWithLines is a convenience for tests: build a matcher from a single set of
@@ -89,26 +163,17 @@ func readLines(path string) ([]string, error) {
 // path is ignored if any layer matches it and no later layer explicitly
 // un-ignores it.
 func (m *Matcher) Ignored(rel string) bool {
-	rel = filepath.ToSlash(rel)
 	if m == nil {
 		return false
 	}
+	targetAbs := filepath.Join(m.scanRoot, filepath.FromSlash(rel))
 	result := false
-	// Layers are walked root-first; deeper layers take precedence. A deeper
-	// layer that mentions the path (positively or via negation) overrides the
-	// accumulated result.
+	// Layers are ordered outermost-first; deeper layers take precedence. A layer
+	// that mentions the path (positively or via negation) overrides the result.
 	for i, gi := range m.ignores {
-		prefix := m.dirs[i]
-		candidate := rel
-		if prefix != "." && prefix != "" {
-			if !strings.HasPrefix(candidate, prefix+"/") && candidate != prefix {
-				continue
-			}
-			if candidate != prefix {
-				candidate = strings.TrimPrefix(candidate, prefix+"/")
-			} else {
-				candidate = ""
-			}
+		candidate, ok := layerCandidate(m.dirs[i], targetAbs)
+		if !ok {
+			continue // this layer is not an ancestor of (or at) the target
 		}
 		applies, ignored := layerApplies(gi, candidate)
 		if applies {
@@ -116,6 +181,21 @@ func (m *Matcher) Ignored(rel string) bool {
 		}
 	}
 	return result
+}
+
+// layerCandidate returns the target path relative to a layer's directory, or
+// ("", false) when the layer directory is not an ancestor of (or equal to) the
+// target (so its patterns cannot apply).
+func layerCandidate(layerDir, targetAbs string) (string, bool) {
+	rel, err := filepath.Rel(layerDir, targetAbs)
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return rel, true
 }
 
 // HasAnyMatchUnder reports whether any ignore pattern could possibly match a
@@ -132,21 +212,31 @@ func (m *Matcher) HasAnyMatchUnder(dir string) bool {
 	if m == nil {
 		return false
 	}
-	dir = filepath.ToSlash(dir)
-	if dir == "" || dir == "." {
-		dir = "."
-	}
+	targetAbs := filepath.Join(m.scanRoot, filepath.FromSlash(dir))
 	for i := range m.ignores {
 		L := m.dirs[i]
 		if L == "" || L == "." {
 			return true // root layer matches the whole tree
 		}
-		L = filepath.ToSlash(L)
-		if dir == L ||
-			strings.HasPrefix(dir, L+"/") ||
-			strings.HasPrefix(L, dir+"/") {
+		// A layer applies to the subtree iff its dir is an ancestor of, a
+		// descendant of, or equal to the target dir.
+		rel, err := filepath.Rel(L, targetAbs)
+		if err != nil {
 			return true
 		}
+		rel = filepath.ToSlash(rel)
+		if rel == ".." || strings.HasPrefix(rel, "../") {
+			// L is NOT under target; maybe target is under L (layer above).
+			rel2, err2 := filepath.Rel(targetAbs, L)
+			if err2 == nil {
+				r2 := filepath.ToSlash(rel2)
+				if r2 != ".." && !strings.HasPrefix(r2, "../") {
+					return true // target is an ancestor of L
+				}
+			}
+			continue
+		}
+		return true // target is under L (or equal)
 	}
 	return false
 }

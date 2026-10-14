@@ -68,3 +68,67 @@ func TestVcsIgnoreAlsoRespected(t *testing.T) {
 		t.Fatal("public.txt should not be ignored")
 	}
 }
+
+// The ignore walk is UPWARD too: scanning a SUBDIRECTORY must still honor the
+// ignore files of its ANCESTORS — but only up to the workspace root (the dir
+// holding the workspace marker). A marker-less parent tree is never consulted.
+func TestUpwardIgnoreWithinWorkspace(t *testing.T) {
+	ws := t.TempDir()
+	// Workspace root: a marker + a root .gitignore.
+	_ = os.WriteFile(filepath.Join(ws, ".easyvcs-workspace"), []byte("{}"), 0o644)
+	_ = os.WriteFile(filepath.Join(ws, ".gitignore"), []byte("*.log\n"), 0o644)
+	// A subdir with its own ignore, and a nested dir to scan.
+	sub := filepath.Join(ws, "sub")
+	_ = os.MkdirAll(filepath.Join(sub, "deep"), 0o755)
+	_ = os.WriteFile(filepath.Join(sub, ".gitignore"), []byte("*.tmp\n"), 0o644)
+
+	// Scan from sub/deep: it must see BOTH the root and sub ignore files.
+	m, err := New(filepath.Join(sub, "deep"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Ignored("a.log") {
+		t.Fatal("ancestor (workspace root) .gitignore should apply when scanning a subdir")
+	}
+	if !m.Ignored("b.tmp") {
+		t.Fatal("ancestor (sub) .gitignore should apply when scanning a subdir")
+	}
+	if m.Ignored("keep.txt") {
+		t.Fatal("keep.txt should not be ignored")
+	}
+}
+
+// A parent directory OUTSIDE the workspace (no marker between them) is NEVER
+// consulted, so an unrelated .gitignore above the workspace cannot leak in.
+func TestUpwardIgnoreStopsAtWorkspace(t *testing.T) {
+	outer := t.TempDir()
+	// An unrelated .gitignore ABOVE the workspace.
+	_ = os.WriteFile(filepath.Join(outer, ".gitignore"), []byte("*.secret\n"), 0o644)
+	ws := filepath.Join(outer, "proj")
+	_ = os.MkdirAll(ws, 0o755)
+	_ = os.WriteFile(filepath.Join(ws, ".easyvcs-workspace"), []byte("{}"), 0o644)
+
+	m, err := New(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Ignored("x.secret") {
+		t.Fatal("an ignore file OUTSIDE the workspace must not apply")
+	}
+}
+
+// Without any workspace marker, NO ancestors are consulted (safe default).
+func TestUpwardIgnoreNeedsMarker(t *testing.T) {
+	outer := t.TempDir()
+	_ = os.WriteFile(filepath.Join(outer, ".gitignore"), []byte("*.log\n"), 0o644)
+	sub := filepath.Join(outer, "plain")
+	_ = os.MkdirAll(sub, 0o755)
+
+	m, err := New(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Ignored("a.log") {
+		t.Fatal("without a marker, parent .gitignore must not apply")
+	}
+}
