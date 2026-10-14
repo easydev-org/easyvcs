@@ -18,9 +18,25 @@ subject is a pinned, content-addressed snapshot.
   `store.RoleOf`). Reads need `read`, requests need `propose` (developer+),
   merges need `merge` (owner/maintainer).
 
+## Namespaces & scopes
+
+A **namespace is the only container** — there is no separate repository entity.
+A namespace is a SINGLE-segment name (`easydev-org`). The old "repository" is a
+**subdirectory** of the namespace, addressed by the **`?path=` query** (a
+repo-relative directory; `""` = the root). See `docs/namespace-container.md` and
+`docs/subrepo-scopes.md`.
+
+- **Every scoped endpoint reads its scope from `?path=`** — one concept, one
+  parameter, one coordinate system (there is no body `path` field).
+- A scope's refs/revisions are **projections**: a ROOT ref is visible in a
+  sub-scope iff its tip contains that directory; a sub-scope ref is visible only
+  in its own subtree.
+- Objects (blob/tree) are global and content-addressed; a sub-scope adds no
+  storage — it only filters metadata by path.
+
 ## Ref semantics
 
-An empty `ref` means the repository's **default branch** (`RepoMeta.DefaultBranch`,
+An empty `ref` means the namespace's **default branch** (`RepoMeta.DefaultBranch`,
 falling back to `main`). A non-empty `ref` may be a branch name, a tag name, a
 revision id (or a unique prefix), or a snapshot hash.
 
@@ -69,28 +85,27 @@ The CLI resolves the identity from `--author`/`--session` > `EASYVCS_AUTHOR_NAME
 | POST | `/api/v1/tokens` | token | create a token (`level: read\|write`); returns plaintext once |
 | DELETE | `/api/v1/tokens/{id}` | token | delete one of the caller's tokens |
 
-## Hosting (orgs / repos)
+## Hosting (namespaces — the only container)
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/namespaces` | any | repositories the caller can access (public + own/member); each carries `default_branch` + `private` inline. `?owned=true` lists ONLY the caller own/member repos (no other tenant public repos) |
-| GET | `/api/v1/namespaces` | any | namespaces the caller owns |
-| POST | `/api/v1/namespaces` | token | create a namespace (owned by the caller) |
-| GET | `/api/v1/namespaces/{ns}` | read | metadata: description / visibility / default_branch / kind / empty. **404** when the repo does not exist; **403** only when it exists but the caller may not read it (so a client can distinguish missing from forbidden) |
-| POST | `/api/v1/namespaces/{ns}` | token | create a repository (owner = caller). Body `{description?, visibility?, default_branch?, init?}`. **New repos default to `private`** (multi-tenant safety; pass `visibility:"public"` to publish). `init:true` seeds an initial empty commit on `main` (server-side bootstrap, bypassing branch protection) so branches can be created from `main` |
+| GET | `/api/v1/namespaces` | any | namespaces the caller can access (public + own/member); each carries `default_branch` + `private` inline. `?owned=true` lists ONLY the caller's own/member namespaces (no other tenant's public ones) |
+| POST | `/api/v1/namespaces` | token | create a namespace (owned by the caller; idempotent when already owned) |
+| GET | `/api/v1/namespaces/{ns}` | read | metadata: description / visibility / default_branch / kind / empty. **404** when the namespace does not exist; **403** only when it exists but the caller may not read it (so a client can distinguish missing from forbidden) |
+| POST | `/api/v1/namespaces/{ns}` | token | create a namespace (owner = caller). Body `{description?, visibility?, default_branch?, init?}`. **New namespaces default to `private`** (multi-tenant safety; pass `visibility:"public"` to publish). `init:true` seeds an initial empty commit on `main` (server-side bootstrap, bypassing branch protection) so branches can be created from `main` |
 | PATCH | `/api/v1/namespaces/{ns}` | owner | update description / visibility / default_branch |
-| DELETE | `/api/v1/namespaces/{ns}` | owner | delete a repository |
+| DELETE | `/api/v1/namespaces/{ns}` | owner | delete a namespace (and all its scoped data) |
 
 ## Refs
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/namespaces/{ns}/refs` | read | all branch + tag refs |
-| GET | `/api/v1/namespaces/{ns}/branches` | read | branches (with tip sha) |
-| POST | `/api/v1/namespaces/{ns}/branches` | write | `{name, from}`; derives a fresh revision |
-| DELETE | `/api/v1/namespaces/{ns}/branches/{branch}` | write | delete a branch |
-| GET | `/api/v1/namespaces/{ns}/tags` | read | tags |
-| POST | `/api/v1/namespaces/{ns}/tags` | write | `{name, target}`; immutable (re-tag is 409) |
+| GET | `/api/v1/namespaces/{ns}/refs?path=` | read | branch + tag refs VISIBLE in the scope (`?path=`; projected + the scope's own) |
+| GET | `/api/v1/namespaces/{ns}/branches?path=` | read | branches (with tip sha), scoped |
+| POST | `/api/v1/namespaces/{ns}/branches?path=` | write | `{name, from}`; creates a branch in the SCOPE (`?path=`); derives a fresh revision |
+| DELETE | `/api/v1/namespaces/{ns}/branches/{branch}?path=` | write | delete a branch in the scope |
+| GET | `/api/v1/namespaces/{ns}/tags?path=` | read | tags visible in the scope |
+| POST | `/api/v1/namespaces/{ns}/tags?path=` | write | `{name, target}`; a SCOPED tag (`?path=`); immutable (re-tag is 409) |
 | POST | `/api/v1/namespaces/{ns}/branches/{branch}/sync` | write | integrate `base` (default `main`) into `{branch}`; `{base?}`; returns `{ok, branch, base, clean, conflicts[], revision_id, snapshot}` (+`up_to_date`). See "Branch sync" below |
 
 ## Branch sync
@@ -120,7 +135,7 @@ the base (git's *update branch / merge base into this branch*). Auth is
 | GET | `/api/v1/namespaces/{ns}/tree?ref=&path=` | read | directory listing (name/kind/size/sha) |
 | GET | `/api/v1/namespaces/{ns}/blob?ref=&path=` | read | text inline; binary is flagged (use `/raw`) |
 | GET | `/api/v1/namespaces/{ns}/raw?ref=&path=` | read | raw bytes (any content type) |
-| GET | `/api/v1/namespaces/{ns}/log?ref=&path=&limit=` | read | commit history (or a file's history); each entry has `author` + `session`. **`ref` empty = the whole repository's revisions; `ref` set (branch/tag/revision id) = only the revisions REACHABLE from it** (the branch's own history, along first-parent + fork edges); an unknown `ref` is 404 |
+| GET | `/api/v1/namespaces/{ns}/log?ref=&path=&limit=` | read | commit history (or a file's history); each entry has `author` + `session`. **`ref` empty = the whole namespace's revisions; `ref` set (branch/tag/revision id) = only the revisions REACHABLE from it** (the branch's own history, along first-parent + fork edges); an unknown `ref` is 404 |
 | GET | `/api/v1/namespaces/{ns}/commit/{sha}` | read | commit/snapshot metadata (`author` + `session`) |
 | GET | `/api/v1/namespaces/{ns}/diff?base=&head=` | read | per-file diff between two snapshots (`binary` flag) |
 | GET | `/api/v1/namespaces/{ns}/blame?ref=&path=` | read | line-level attribution (`author` + `session` per line) |
@@ -128,7 +143,7 @@ the base (git's *update branch / merge base into this branch*). Auth is
 
 ## git smart HTTP (read-only)
 
-An easyvcs repository is also a **standard git remote** (read-only), so
+A namespace is also a **standard git remote** (read-only), so
 `git clone`/`fetch` and package managers that treat a git repo as a package work
 directly. Auth is the same bearer token (the git CLI sends it as Basic auth,
 which the server accepts). There is **no `git push`** — writes go through the
@@ -150,12 +165,12 @@ its own repository (its history = the commits that touch it):
 git clone http://<user>:<token>@<server>/api/v1/namespaces/{ns}/<subdir>
 ```
 
-Go module vanity also works per subdir: `GET .../{ns}/{name}/<subdir>?go-get=1`
+Go module vanity also works per subdir: `GET .../{ns}/<subdir>?go-get=1`
 returns a `go-import` meta tag pointing at that subdir's git endpoint.
 
 ### Sub-repository (native)
 
-Any subdirectory of a repository is itself a (recursive) repository: its
+Any subdirectory of a namespace is itself a (recursive) repository: its
 revisions are the commits that changed anything under it, and its refs are the
 branches/tags whose tip contains it. This is backed by the `revision_path_dirs`
 index (built at write time; lazily backfilled for older revisions), so it is
@@ -169,7 +184,7 @@ O(revisions under the path).
 
 A push mirror force-pushes ONE branch's tree to an external git destination
 (`git push --force`, mirror semantics: the destination branch keeps exactly that
-tree). A repository may have several. The mirror token is a secret: it is stored
+tree). A namespace may have several. The mirror token is a secret: it is stored
 encrypted and is **never** returned by any endpoint or written to a log. A
 background scheduler (see `cmd/server`) periodically re-pushes every mirror;
 `EASYVCS_MIRROR_INTERVAL` (seconds; unset = 5m, `<=0` disables) and
@@ -194,18 +209,18 @@ interop). Unlike push mirrors, the import path uses go-git, so the server image
 needs no `git` binary for it.
 
 Auth is **owner**. The repository may be created by the import (`create` defaults
-to true); the org must be owned by (or claimable by) the caller. Importing into a
+to true); the namespace must be owned by (or claimable by) the caller. Importing into a
 repository that already has content on `main` is refused **409** (it never
 overwrites). A source that cannot be reached/authenticated is **502** with a
 redacted `detail` — the token and any URL userinfo are never returned or logged.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/namespaces/{ns}/import` | owner | `{url, branch?, depth?, token?, ssh_key?, ssh_key_passphrase?, description?, create?}`; `branch` defaults to `main` (the source ref name is irrelevant — it lands on `main`). `depth` (default `0` = full history; `1` = tip only, i.e. a single-revision **snapshot**; `N` = last N commits) — executed by go-git, no `git` binary. Returns `{ok, org, repo, branch:"main", revisions}`. Bounded by `EASYVCS_IMPORT_TIMEOUT` (seconds; unset = 15m). |
+| POST | `/api/v1/namespaces/{ns}/import` | owner | `{url, branch?, depth?, token?, ssh_key?, ssh_key_passphrase?, description?, create?}`; `branch` defaults to `main` (the source ref name is irrelevant — it lands on `main`). `depth` (default `0` = full history; `1` = tip only, i.e. a single-revision **snapshot**; `N` = last N commits) — executed by go-git, no `git` binary. Returns `{ok, namespace, branch:"main", revisions}`. Bounded by `EASYVCS_IMPORT_TIMEOUT` (seconds; unset = 15m). |
 
 ## Commit (working-copy-free write path)
 
-`POST /api/v1/namespaces/{ns}/commit` applies a set of file operations to a
+`POST /api/v1/namespaces/{ns}/commit?path=<scope>` applies a set of file operations to a
 **non-default** branch in one revision — no server-side working copy, no staging
 area. It is the easyvcs-native replacement for a git clone/amend/force-push flow
 (and for a workspace gateway's "staging placeholder" hack): N file ops become
@@ -243,11 +258,14 @@ Body:
 - empty `files` with no `revision_id` is **400**.
 - `author` defaults to the authenticated caller. The server authorizes the
   **action**, not the content, so it never rejects a request over its author.
-- returns `{ok, branch, revision_id, snapshot}`.
+- returns `{ok, branch, revision_id, snapshot}` (plus `path` for a scoped lift).
+- **Scope (`?path=<dir>`)**: when set, the file ops are relative to that
+  directory and are **LIFTED** onto the branch — the new root revision touches
+  ONLY that subtree (`docs/subrepo-scopes.md` §5). Empty = a normal commit.
 
 ## Snapshot (propose without a branch)
 
-`POST /api/v1/namespaces/{ns}/snapshot` applies a set of file operations and
+`POST /api/v1/namespaces/{ns}/snapshot?path=<scope>` applies a set of file operations and
 returns a new **revision + snapshot** that **no ref points at** — it moves no
 branch or tag. It is the "propose from a sandbox" primitive: the RR source is a
 **snapshot**, not a branch, so a client can upload the files it changed and hand
@@ -284,10 +302,10 @@ Body:
 
 ## Branch protection
 
-A repository may mark one or more branches as **protected**: a protected branch
+A namespace may mark one or more branches as **protected**: a protected branch
 may only change through a **merged Revision Request**. A direct push that would
 move a protected branch is refused (403, `error: protected-branch`); a no-op push
-(target unchanged) is allowed. New repositories protect `main` by default.
+(target unchanged) is allowed. New namespaces protect `main` by default.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
@@ -305,7 +323,7 @@ no source revision, and no fork.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/namespaces/{ns}/rr` | propose | create; `{source_snapshot, target_branch, title, body}` |
+| POST | `/api/v1/namespaces/{ns}/rr?path=` | propose | create; `{source_snapshot, target_branch, title, body}`; `?path=` scopes the RR to a subtree (its diff/merge touch only that path) |
 | POST | `/api/v1/namespaces/{ns}/rr/objects` | propose | upload the source snapshot's objects (bundle, **no refs**) |
 | GET | `/api/v1/namespaces/{ns}/rr?state=` | read | list requests |
 | GET | `/api/v1/namespaces/{ns}/rr/{iid}` | read | one request; includes `reviews` + `comments` |

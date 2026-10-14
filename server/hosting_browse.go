@@ -30,7 +30,7 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
-	path := strings.Trim(r.URL.Query().Get("path"), "/")
+	path := scopePath(r)
 	if path != "" {
 		entry, err := ws.FindEntry(tree, path)
 		if err != nil {
@@ -85,7 +85,7 @@ func (s *Server) handleBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := revision.NewWorkspace(repo)
-	path := strings.Trim(r.URL.Query().Get("path"), "/")
+	path := scopePath(r)
 	if path == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("path is required"))
 		return
@@ -145,7 +145,7 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := revision.NewWorkspace(repo)
-	path := strings.Trim(r.URL.Query().Get("path"), "/")
+	path := scopePath(r)
 	if path == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("path is required"))
 		return
@@ -201,7 +201,7 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := revision.NewWorkspace(repo)
 	limit := limitFrom(r)
-	path := strings.Trim(r.URL.Query().Get("path"), "/")
+	path := scopePath(r)
 	ref := r.URL.Query().Get("ref")
 
 	if path != "" {
@@ -337,7 +337,7 @@ func (s *Server) handleBlame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := revision.NewWorkspace(repo)
-	path := strings.Trim(r.URL.Query().Get("path"), "/")
+	path := scopePath(r)
 	if path == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("path is required"))
 		return
@@ -383,7 +383,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	}
 	// Optional `path`: export only a SUBTREE (a directory), rooted at that
 	// directory. Absent/empty = the whole tree (unchanged behaviour).
-	sub := strings.Trim(r.URL.Query().Get("path"), "/")
+	sub := scopePath(r)
 	w.Header().Set("Content-Type", "application/gzip")
 	name := repo.Name
 	if sub != "" {
