@@ -32,8 +32,8 @@ func (r *Repo) IsMirror() bool {
 
 // RepoMeta returns the hosting metadata for a repository.
 func (r *Repo) RepoMeta() (RepoMeta, error) {
-	var row repoRow
-	if err := r.cs.d.gdb.Where("id=?", r.repoID).First(&row).Error; err != nil {
+	var row namespaceRow
+	if err := r.cs.d.gdb.Where("id=?", r.namespaceID).First(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return RepoMeta{}, ErrNotFound
 		}
@@ -53,7 +53,7 @@ func (r *Repo) RepoMeta() (RepoMeta, error) {
 
 // UpdateRepoMeta updates description/visibility/default branch.
 func (r *Repo) UpdateRepoMeta(m RepoMeta) error {
-	return r.cs.d.gdb.Model(&repoRow{}).Where("id=?", r.repoID).Updates(map[string]any{
+	return r.cs.d.gdb.Model(&namespaceRow{}).Where("id=?", r.namespaceID).Updates(map[string]any{
 		"description": m.Description, "visibility": m.Visibility, "default_branch": m.DefaultBranch,
 	}).Error
 }
@@ -64,7 +64,7 @@ func (r *Repo) UpdateMirrorMeta(m RepoMeta) error {
 	if err != nil {
 		return err
 	}
-	return r.cs.d.gdb.Model(&repoRow{}).Where("id=?", r.repoID).Updates(map[string]any{
+	return r.cs.d.gdb.Model(&namespaceRow{}).Where("id=?", r.namespaceID).Updates(map[string]any{
 		"kind": m.Kind, "mirror_url": m.MirrorURL, "mirror_branch": m.MirrorBranch,
 		"mirror_interval": m.MirrorInterval, "mirror_last_rev": m.MirrorLastRev,
 		"mirror_last_sync": m.MirrorLastSync, "mirror_last_error": m.MirrorLastErr,

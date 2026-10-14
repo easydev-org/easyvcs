@@ -3,8 +3,8 @@
 // be embedded or run as a standalone binary (see cmd/server). Every route lives
 // under the /api/v1 prefix; the smart protocol is:
 //
-//	POST /api/v1/repos/{ns}/{name}/advertise   (read: repo read ACL)
-//	POST /api/v1/repos/{ns}/{name}/fetch       (read: repo read ACL)
+//	POST /api/v1/namespaces/{ns}/{name}/advertise   (read: repo read ACL)
+//	POST /api/v1/namespaces/{ns}/{name}/fetch       (read: repo read ACL)
 //	POST /api/v1/repos/{ns}/{name}/push        (write: repo ACL, non-fast-forward)
 //
 // The hosting surface (identity, orgs/repos, refs, browse) is in hosting.go and
@@ -150,7 +150,7 @@ func auditEvent(r *http.Request, tk *store.Token) store.AuditEvent {
 		Timestamp: time.Now().UTC().UnixMilli(),
 		Action:    actionName(r),
 		Namespace: r.PathValue("ns"),
-		Repo:      r.PathValue("name"),
+		Repo:      "",
 		UserID:    userID(tk),
 		IP:        remoteIP(r),
 	}
@@ -206,7 +206,7 @@ func userIDVal(tk *store.Token) int64 {
 // canRead reports whether the caller may read the repo. A public repo is
 // readable even anonymously; a private repo requires a role (owner / member) or
 // an open instance (no users at all) for dev/CLI.
-func (s *Server) canRead(rref store.RepoRef, tk *store.Token) bool {
+func (s *Server) canRead(rref store.NSRef, tk *store.Token) bool {
 	role, err := s.cs.RoleOfRef(rref, userIDVal(tk))
 	if err == nil && role.CanRead() {
 		return true
@@ -218,7 +218,7 @@ func (s *Server) canRead(rref store.RepoRef, tk *store.Token) bool {
 // requires a credential; on an open instance (no users, legacy CLI) any
 // authenticated-or-anonymous writer is permitted for dev ergonomics — but the
 // production path is owner-only.
-func (s *Server) canPush(rref store.RepoRef, tk *store.Token) bool {
+func (s *Server) canPush(rref store.NSRef, tk *store.Token) bool {
 	role, err := s.cs.RoleOfRef(rref, userIDVal(tk))
 	if err == nil && role.CanPush() {
 		return true
@@ -247,7 +247,7 @@ func (s *Server) requireRepoAccess(write bool, next http.HandlerFunc) http.Handl
 			writeErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized: write requires a token"))
 			return
 		}
-		rref := store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
+		rref := store.NSRef{Name: nsRefName(r)}
 		if write {
 			if !s.canPush(rref, tk) {
 				s.auditDenied(r, tk, "no write access")
@@ -294,7 +294,7 @@ func (s *Server) requireRepoRead(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized: missing or invalid token"))
 			return
 		}
-		rref := store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
+		rref := store.NSRef{Name: nsRefName(r)}
 		// Absence is decided BEFORE the ACL check so a missing repo is 404 even
 		// when the caller is anonymous (on an open instance canRead is always
 		// true, which would otherwise mask the 404).
@@ -349,17 +349,36 @@ func (s *Server) router() *http.ServeMux {
 	// Liveness/readiness probes: unauthenticated and unaudited (see health.go).
 	mux.HandleFunc("GET /api/v1/healthz", s.handleHealthz)
 	mux.HandleFunc("GET /api/v1/readyz", s.handleReadyz)
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/advertise", s.requireRepoAccess(false, s.handleAdvertise))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/fetch", s.requireRepoAccess(false, s.handleFetch))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/push", s.requireRepoAccess(true, s.handlePush))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/advertise", s.requireRepoAccess(false, s.handleAdvertise))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/fetch", s.requireRepoAccess(false, s.handleFetch))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/push", s.requireRepoAccess(true, s.handlePush))
 	s.mountRR(mux)
 	s.mountHosting(mux)
 	s.mountUI(mux)
 	return mux
 }
 
+// repo opens the NAMESPACE named by {ns} (the single container). A scope PATH
+// within it comes from the `?path=` query (or, for the git catch-all route, the
+// extra path segments) — see docs/namespace-container.md.
+// nsRefName builds the container name from {ns}/{name} path values.
+func nsRefName(r *http.Request) string {
+	n := r.PathValue("ns")
+	if x := r.PathValue("name"); x != "" {
+		n = n + "/" + x
+	}
+	return n
+}
+
 func (s *Server) repo(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {
-	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")})
+	// {ns} names the container. {name} (and any deeper segment) is the SCOPE
+	// PATH within it — handlers read it via scopePath(r) (docs/namespace-container.md).
+	name := nsRefName(r)
+	if name == "" {
+		writeErr(w, http.StatusNotFound, errors.New("namespace is required"))
+		return nil, false
+	}
+	repo, err := s.cs.OpenRepo(store.NSRef{Name: name})
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return nil, false
@@ -545,7 +564,7 @@ func tokenFrom(ctx context.Context) *store.Token {
 // this is an in-process mutex; on Postgres it is a cross-replica advisory lock,
 // so two server instances serialise writes to the same repository.
 func (s *Server) withRepoLock(repo *store.Repo, fn func() error) error {
-	unlock, err := s.repoLocks.lock(context.Background(), repo.RepoID())
+	unlock, err := s.repoLocks.lock(context.Background(), repo.NamespaceID())
 	if err != nil {
 		return err
 	}
@@ -612,13 +631,11 @@ func decodeBundleBody(r *http.Request) (*transfer.Bundle, error) {
 	// size. (Wrapping the gzip reader would allow a zip bomb to inflate.)
 	raw := r.Body
 	if r.Header.Get("Content-Encoding") == "gzip" {
-		// Feed the gzip reader the FULL (already MaxBytesReader-bounded) body.
-		// Do NOT wrap it in a small io.LimitReader: that bounds the WHOLE
-		// compressed stream, not just the header, so any bundle whose
-		// compressed size exceeds the cap is truncated mid-stream and
-		// io.ReadAll fails with "unexpected EOF". The compressed size is
-		// already bounded by MaxBytesReader; the decompressed size by
-		// maxInflatedBody below.
+		// raw is already bounded by MaxBytesReader (maxBody, 512 MiB), which
+		// counts the compressed bytes off the wire. Do NOT wrap it in a smaller
+		// LimitReader: that truncates the gzip stream mid-way for any bundle
+		// whose compressed size exceeds the limit, surfacing as "unexpected
+		// EOF" at the client. The decompression is separately bounded below.
 		gr, err := gzip.NewReader(raw)
 		if err != nil {
 			return nil, err
@@ -679,4 +696,12 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 		return
 	}
 	writeJSON(w, code, map[string]any{"error": err.Error()})
+}
+
+// topSegment returns the first path segment of a slash-named container name.
+func topSegment(name string) string {
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		return name[:i]
+	}
+	return name
 }

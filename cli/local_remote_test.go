@@ -40,7 +40,7 @@ func TestLocalRemotePushFetchPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repoA, err := csA.Create(store.RepoRef{Namespace: "team", Name: "app"})
+	repoA, err := csA.Create(store.NSRef{Name: "team" + "/" + "app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestLocalRemotePushFetchPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Marker records the store home so openLocalRepo can reopen repoA.
-	if err := store.WriteMarker(dirA, &store.WorkspaceMarker{Repo: repoA.RepoRef(), Home: homeA}); err != nil {
+	if err := store.WriteMarker(dirA, &store.WorkspaceMarker{Repo: repoA.NSRef(), Home: homeA}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -66,11 +66,11 @@ func TestLocalRemotePushFetchPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repoB, err := csB.Create(store.RepoRef{Namespace: "local", Name: "clone"})
+	repoB, err := csB.Create(store.NSRef{Name: "local" + "/" + "clone"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.RepoRef(), Home: homeB}); err != nil {
+	if err := store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.NSRef(), Home: homeB}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,7 +132,7 @@ func TestLocalRemotePushFetchPull(t *testing.T) {
 	if _, err := transfer.Apply(target, bundle); err != nil {
 		t.Fatalf("push to local remote: %v", err)
 	}
-	repoA2, _ := csA.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repoA2, _ := csA.OpenRepo(store.NSRef{Name: "team" + "/" + "app"})
 	mainA, err := repoA2.GetRef("main")
 	if err != nil || mainA == nil {
 		t.Fatalf("remote main missing after push: %v", err)

@@ -14,13 +14,13 @@ import (
 // snapshotPost sends a /snapshot body to team/app.
 func snapshotPost(t *testing.T, mux *http.ServeMux, token string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
-	return hreq(mux, http.MethodPost, "/api/v1/repos/team/app/snapshot", token, body)
+	return hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/snapshot", token, body)
 }
 
 // refNames returns the repo's ref names as a set.
 func refNames(t *testing.T, mux *http.ServeMux, token string) map[string]bool {
 	t.Helper()
-	rec := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/refs", token, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/refs", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("refs: %d %s", rec.Code, rec.Body.String())
 	}
@@ -89,7 +89,7 @@ func TestSnapshotProposeRoundTrip(t *testing.T) {
 	}
 	snap := decode(t, rec)["snapshot"].(string)
 
-	rr := hreq(mux, http.MethodPost, "/api/v1/repos/team/app/rr", token, map[string]any{
+	rr := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/rr", token, map[string]any{
 		"source_snapshot": snap, "target_branch": "main", "title": "from snapshot",
 	})
 	if rr.Code != http.StatusOK {
@@ -97,11 +97,11 @@ func TestSnapshotProposeRoundTrip(t *testing.T) {
 	}
 	iid := int64(decode(t, rr)["iid"].(float64))
 
-	mr := hreq(mux, http.MethodPost, "/api/v1/repos/team/app/rr/"+itoa(iid)+"/merge", token, nil)
+	mr := hreq(mux, http.MethodPost, "/api/v1/namespaces/team/app/rr/"+itoa(iid)+"/merge", token, nil)
 	if mr.Code != http.StatusOK {
 		t.Fatalf("rr merge: %d %s", mr.Code, mr.Body.String())
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/tree?ref=main", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/tree?ref=main", token, nil)
 	if !has(tr.Body.String(), "new.txt") {
 		t.Fatalf("merged main must contain new.txt: %s", tr.Body.String())
 	}
@@ -204,7 +204,7 @@ func TestSnapshotAuthProposeLevel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.cs.SetRepoMember(repo.RepoID(), dev.ID, "developer", nil); err != nil {
+	if err := s.cs.SetRepoMember(repo.NamespaceID(), dev.ID, "developer", nil); err != nil {
 		t.Fatal(err)
 	}
 	devTok := "dev-token"
@@ -220,7 +220,7 @@ func TestSnapshotAuthProposeLevel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.cs.SetRepoMember(repo.RepoID(), mnt.ID, "maintainer", nil); err != nil {
+	if err := s.cs.SetRepoMember(repo.NamespaceID(), mnt.ID, "maintainer", nil); err != nil {
 		t.Fatal(err)
 	}
 	mntTok := "mnt-token"

@@ -18,7 +18,7 @@ func newTestRepo2(t *testing.T) (*store.Repo, *store.CentralStore, *Workspace) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := cs.Create(store.RepoRef{Namespace: "n", Name: "r"})
+	repo, err := cs.Create(store.NSRef{Name: "n" + "/" + "r"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestTransferCollectApplyRoundTrip(t *testing.T) {
 	repoB, csB, _ := newTestRepo2(t)
 	defer func() { _ = csB.Close() }()
 	// repoB is a second repo in the same central store; use a separate one.
-	repoB2, err := csA.Create(store.RepoRef{Namespace: "n", Name: "rB"})
+	repoB2, err := csA.Create(store.NSRef{Name: "n" + "/" + "rB"})
 	if err != nil {
 		t.Fatal(err)
 	}

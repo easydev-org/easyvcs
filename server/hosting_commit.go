@@ -91,25 +91,6 @@ func (s *Server) handleCommitFiles(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	// A `/commit` MUST target an EXISTING branch. Committing to a branch that
-	// does not exist used to silently create a ROOT revision (the tree = only
-	// the files in this request), which then merged into the target and wiped
-	// every other file. Require the branch up front; a deliberate root revision
-	// must be requested EXPLICITLY with `parents: []` (an empty array, distinct
-	// from an omitted field) — that is the import/bootstrap path.
-	branchExists := false
-	if ws0 := revision.NewWorkspace(repo); true {
-		if ref, rerr := ws0.GetRef(req.Branch); rerr == nil && ref != nil && ref.Kind == store.RefBranch {
-			branchExists = true
-		}
-	}
-	if !branchExists && req.RevisionID == "" && req.Parents == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf(
-			"branch %q does not exist; create it first (POST /branches {name, from}) or pass an explicit empty \"parents\": [] to create a root revision",
-			req.Branch,
-		))
-		return
-	}
 	// An empty file set is only valid as a reword of an existing revision.
 	if len(req.Files) == 0 && req.RevisionID == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("files must not be empty unless revision_id is given (reword)"))

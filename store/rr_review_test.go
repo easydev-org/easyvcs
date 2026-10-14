@@ -9,11 +9,11 @@ import (
 // (no longer the legacy mr_* tables), oldest-first.
 func TestRRReviewCommentRoundTrip(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, err := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, err := cs.Create(NSRef{Name: "n-r"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rr, err := cs.CreateRevisionRequest(repo.RepoID(), &RevisionRequest{
+	rr, err := cs.CreateRevisionRequest(repo.NamespaceID(), &RevisionRequest{
 		SourceSnapshot: "aa", BaseSnapshot: "bb", TargetBranch: "main", Title: "t",
 	})
 	if err != nil {
@@ -63,7 +63,7 @@ func TestRRReviewCommentRoundTrip(t *testing.T) {
 	}
 
 	// Isolation: another RR has none.
-	rr2, err := cs.CreateRevisionRequest(repo.RepoID(), &RevisionRequest{
+	rr2, err := cs.CreateRevisionRequest(repo.NamespaceID(), &RevisionRequest{
 		SourceSnapshot: "cc", BaseSnapshot: "dd", TargetBranch: "main", Title: "t2",
 	})
 	if err != nil {

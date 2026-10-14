@@ -11,7 +11,7 @@ import (
 func newScopedRepo(t *testing.T) *Repo {
 	t.Helper()
 	cs := newTestCentral(t)
-	repo, err := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, err := cs.Create(NSRef{Name: "n-r"})
 	if err != nil {
 		t.Fatal(err)
 	}

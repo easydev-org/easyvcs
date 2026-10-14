@@ -70,7 +70,7 @@ func newTestRepo3(t *testing.T) (*store.Repo, *store.CentralStore, *revision.Wor
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := cs.Create(store.RepoRef{Namespace: "test", Name: "r"})
+	repo, err := cs.Create(store.NSRef{Name: "test" + "/" + "r"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -67,7 +67,7 @@ func (s *Service) CreateScoped(src Source, targetBranch, scope, title, body stri
 	if err != nil {
 		return nil, err
 	}
-	rr, err := s.cs.CreateRevisionRequest(s.repo.RepoID(), &store.RevisionRequest{
+	rr, err := s.cs.CreateRevisionRequest(s.repo.NamespaceID(), &store.RevisionRequest{
 		SourceSnapshot: src.Snapshot.String(),
 		BaseSnapshot:   base.String(),
 		TargetBranch:   targetBranch,
@@ -160,10 +160,10 @@ func (s *Service) Close(rr *store.RevisionRequest, authorID *int64) (*store.Revi
 	case store.RRMerged:
 		return nil, fmt.Errorf("rr: request is already merged")
 	}
-	if err := s.cs.UpdateRevisionRequestState(rr.RepoID, rr.IID, store.RRClosed); err != nil {
+	if err := s.cs.UpdateRevisionRequestState(rr.NamespaceID, rr.IID, store.RRClosed); err != nil {
 		return nil, err
 	}
-	return s.cs.GetRevisionRequest(rr.RepoID, rr.IID)
+	return s.cs.GetRevisionRequest(rr.NamespaceID, rr.IID)
 }
 
 // Update explicitly re-pins an RR to a new source snapshot (and the current
@@ -179,13 +179,13 @@ func (s *Service) Update(rr *store.RevisionRequest, newSourceSnapshot object.ID,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.cs.UpdateRevisionRequestPin(rr.RepoID, rr.IID, newSourceSnapshot.String(), base.String()); err != nil {
+	if err := s.cs.UpdateRevisionRequestPin(rr.NamespaceID, rr.IID, newSourceSnapshot.String(), base.String()); err != nil {
 		return nil, err
 	}
 	if _, err := s.cs.AddRRUpdate(rr.ID, newSourceSnapshot.String(), base.String(), authorID); err != nil {
 		return nil, err
 	}
-	return s.cs.GetRevisionRequest(rr.RepoID, rr.IID)
+	return s.cs.GetRevisionRequest(rr.NamespaceID, rr.IID)
 }
 
 // IsStale reports whether the target branch has moved since the RR was opened
@@ -363,7 +363,7 @@ func (s *Service) ApplyMerge(rr *store.RevisionRequest, merger store.Author, mer
 		if err := s.cs.PutRRMerge(rr.ID, res.MergedSnapshot.String(), res.MergedRevisionID, "pending", mergedBy); err != nil {
 			return res, err
 		}
-		if err := s.cs.UpdateRevisionRequestState(rr.RepoID, rr.IID, store.RRConflicted); err != nil {
+		if err := s.cs.UpdateRevisionRequestState(rr.NamespaceID, rr.IID, store.RRConflicted); err != nil {
 			return res, err
 		}
 		return res, nil
@@ -383,7 +383,7 @@ func (s *Service) finishMerge(rr *store.RevisionRequest, res MergeResult, merged
 	if err := s.cs.PutRRMerge(rr.ID, res.MergedSnapshot.String(), res.MergedRevisionID, "done", mergedBy); err != nil {
 		return res, err
 	}
-	if err := s.cs.UpdateRevisionRequestState(rr.RepoID, rr.IID, store.RRMerged); err != nil {
+	if err := s.cs.UpdateRevisionRequestState(rr.NamespaceID, rr.IID, store.RRMerged); err != nil {
 		return res, err
 	}
 	return res, nil
@@ -472,11 +472,11 @@ func (s *Service) Resolve(rr *store.RevisionRequest, path string, side int, merg
 		return nil, err
 	}
 	if len(remaining) == 0 {
-		if err := s.cs.UpdateRevisionRequestState(rr.RepoID, rr.IID, store.RROpen); err != nil {
+		if err := s.cs.UpdateRevisionRequestState(rr.NamespaceID, rr.IID, store.RROpen); err != nil {
 			return nil, err
 		}
 	}
-	return s.cs.GetRevisionRequest(rr.RepoID, rr.IID)
+	return s.cs.GetRevisionRequest(rr.NamespaceID, rr.IID)
 }
 
 // baseTree resolves an RR's pinned base_snapshot to its tree id. A zero (or

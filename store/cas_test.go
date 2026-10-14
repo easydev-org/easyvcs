@@ -12,7 +12,7 @@ import (
 // instead of being silently overwritten).
 func TestUpdateRevisionHashCAS(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 
 	tree := object.BlobID([]byte("t"))
 	s1 := &Snapshot{RevisionID: "r1", TreeID: tree, Author: Author{Name: "a"}}

@@ -114,7 +114,7 @@ func stubLocalRemote(t *testing.T, ns, name, content, desc string) (dir string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err = cs.Create(store.RepoRef{Namespace: ns, Name: name})
+	repo, err = cs.Create(store.NSRef{Name: ns + "/" + name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func stubLocalRemote(t *testing.T, ns, name, content, desc string) (dir string, 
 		t.Fatal(err)
 	}
 	dir = t.TempDir()
-	if err := store.WriteMarker(dir, &store.WorkspaceMarker{Repo: repo.RepoRef(), Home: home}); err != nil {
+	if err := store.WriteMarker(dir, &store.WorkspaceMarker{Repo: repo.NSRef(), Home: home}); err != nil {
 		t.Fatal(err)
 	}
 	return dir, rev.ID, repo
@@ -225,12 +225,12 @@ func TestLocalRemotePushAddsRevision(t *testing.T) {
 	homeB := t.TempDir()
 	t.Setenv("EASYVCS_HOME", homeB)
 	csB, _ := store.OpenDefault()
-	repoB, err := csB.Create(store.RepoRef{Namespace: "cl", Name: "app"})
+	repoB, err := csB.Create(store.NSRef{Name: "cl" + "/" + "app"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	dirB := t.TempDir()
-	_ = store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.RepoRef(), Home: homeB})
+	_ = store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.NSRef(), Home: homeB})
 	if err := repoB.PutRemote("origin", srcDir, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -275,9 +275,9 @@ func TestLocalRemoteFetchRecordsRemoteRefs(t *testing.T) {
 	homeB := t.TempDir()
 	t.Setenv("EASYVCS_HOME", homeB)
 	csB, _ := store.OpenDefault()
-	repoB, _ := csB.Create(store.RepoRef{Namespace: "cl", Name: "app"})
+	repoB, _ := csB.Create(store.NSRef{Name: "cl" + "/" + "app"})
 	dirB := t.TempDir()
-	_ = store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.RepoRef(), Home: homeB})
+	_ = store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.NSRef(), Home: homeB})
 	_ = repoB.PutRemote("origin", srcDir, "")
 
 	if err := doFetch(repoB, []string{"origin"}); err != nil {
@@ -309,9 +309,9 @@ func TestLocalRemotePullRebaseMerges(t *testing.T) {
 	homeB := t.TempDir()
 	t.Setenv("EASYVCS_HOME", homeB)
 	csB, _ := store.OpenDefault()
-	repoB, _ := csB.Create(store.RepoRef{Namespace: "cl", Name: "app"})
+	repoB, _ := csB.Create(store.NSRef{Name: "cl" + "/" + "app"})
 	dirB := t.TempDir()
-	_ = store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.RepoRef(), Home: homeB})
+	_ = store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.NSRef(), Home: homeB})
 	_ = repoB.PutRemote("origin", srcDir, "")
 
 	// First pull gives the base.
@@ -372,7 +372,7 @@ func stubLocalRemote2(t *testing.T, ns, name, content, desc string) (dir string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err = cs.Create(store.RepoRef{Namespace: ns, Name: name})
+	repo, err = cs.Create(store.NSRef{Name: ns + "/" + name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func stubLocalRemote2(t *testing.T, ns, name, content, desc string) (dir string,
 		t.Fatal(err)
 	}
 	dir = t.TempDir()
-	if err := store.WriteMarker(dir, &store.WorkspaceMarker{Repo: repo.RepoRef(), Home: home}); err != nil {
+	if err := store.WriteMarker(dir, &store.WorkspaceMarker{Repo: repo.NSRef(), Home: home}); err != nil {
 		t.Fatal(err)
 	}
 	return dir, home, repo
@@ -412,7 +412,7 @@ func TestMarkerWriteAndReadRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("EASYVCS_HOME", home)
 	m := &store.WorkspaceMarker{
-		Repo:            store.RepoRef{Namespace: "n", Name: "r"},
+		Repo:            store.NSRef{Name: "n" + "/" + "r"},
 		CurrentRevision: "rev1",
 		Branch:          "main",
 		Home:            home,
@@ -428,7 +428,7 @@ func TestMarkerWriteAndReadRoundTrip(t *testing.T) {
 	if got.Home != home || got.DSN != "/tmp/custom.db" || got.Branch != "main" || got.CurrentRevision != "rev1" {
 		t.Fatalf("roundtrip mismatch: %+v", got)
 	}
-	if got.Repo.Namespace != "n" || got.Repo.Name != "r" {
+	if got.Repo.Name != "n/r" {
 		t.Fatalf("repo mismatch: %+v", got.Repo)
 	}
 }

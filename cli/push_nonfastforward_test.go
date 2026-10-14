@@ -17,9 +17,9 @@ func TestLocalPushRejectsNonFastForward(t *testing.T) {
 	homeB := t.TempDir()
 	t.Setenv("EASYVCS_HOME", homeB)
 	csB, _ := store.OpenDefault()
-	repoB, _ := csB.Create(store.RepoRef{Namespace: "cl", Name: "app"})
+	repoB, _ := csB.Create(store.NSRef{Name: "cl" + "/" + "app"})
 	dirB := t.TempDir()
-	_ = store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.RepoRef(), Home: homeB})
+	_ = store.WriteMarker(dirB, &store.WorkspaceMarker{Repo: repoB.NSRef(), Home: homeB})
 	_ = repoB.PutRemote("origin", srcDir, "")
 
 	// Pull the single revision (c1) so repoB has main -> c1.

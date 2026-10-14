@@ -25,7 +25,7 @@ const (
 // snapshot — so there is no source kind and no source revision identity.
 type RevisionRequest struct {
 	ID             int64
-	RepoID         int64
+	NamespaceID    int64
 	IID            int64
 	SourceSnapshot string
 	BaseSnapshot   string
@@ -67,10 +67,10 @@ type RRMerge struct {
 
 // CreateRevisionRequest inserts a new RR, assigning the next per-repo IID. The
 // caller supplies the already-pinned source/base snapshots.
-func (s *CentralStore) CreateRevisionRequest(repoID int64, rr *RevisionRequest) (*RevisionRequest, error) {
+func (s *CentralStore) CreateRevisionRequest(namespaceID int64, rr *RevisionRequest) (*RevisionRequest, error) {
 	now := time.Now().UTC().UnixMilli()
 	var maxIID *int64
-	if err := s.d.gdb.Model(&revisionRequestRow{}).Where("repo_id=?", repoID).Select("COALESCE(MAX(iid),0)+1").Scan(&maxIID).Error; err != nil {
+	if err := s.d.gdb.Model(&revisionRequestRow{}).Where("namespace_id=?", namespaceID).Select("COALESCE(MAX(iid),0)+1").Scan(&maxIID).Error; err != nil {
 		return nil, fmt.Errorf("assign RR iid: %w", err)
 	}
 	iid := int64(1)
@@ -89,7 +89,7 @@ func (s *CentralStore) CreateRevisionRequest(repoID int64, rr *RevisionRequest) 
 		target = "main"
 	}
 	row := &revisionRequestRow{
-		RepoID: repoID, IID: iid,
+		NamespaceID: namespaceID, IID: iid,
 		SourceSnapshot: rr.SourceSnapshot,
 		BaseSnapshot:   rr.BaseSnapshot, TargetBranch: target, Path: rr.Path, State: state,
 		Title: rr.Title, Body: rr.Body, AuthorID: rr.AuthorID, Created: now, Updated: now,
@@ -99,7 +99,7 @@ func (s *CentralStore) CreateRevisionRequest(repoID int64, rr *RevisionRequest) 
 	}
 	out := *rr
 	out.ID = row.ID
-	out.RepoID = repoID
+	out.NamespaceID = namespaceID
 	out.IID = iid
 	out.State = state
 	out.TargetBranch = target
@@ -109,9 +109,9 @@ func (s *CentralStore) CreateRevisionRequest(repoID int64, rr *RevisionRequest) 
 }
 
 // GetRevisionRequest returns an RR by repo + iid.
-func (s *CentralStore) GetRevisionRequest(repoID, iid int64) (*RevisionRequest, error) {
+func (s *CentralStore) GetRevisionRequest(namespaceID, iid int64) (*RevisionRequest, error) {
 	var row revisionRequestRow
-	err := s.d.gdb.Where("repo_id=? AND iid=?", repoID, iid).First(&row).Error
+	err := s.d.gdb.Where("namespace_id=? AND iid=?", namespaceID, iid).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}
@@ -122,8 +122,8 @@ func (s *CentralStore) GetRevisionRequest(repoID, iid int64) (*RevisionRequest, 
 }
 
 // ListRevisionRequests lists a repo's RRs, optionally filtered by state.
-func (s *CentralStore) ListRevisionRequests(repoID int64, state string) ([]*RevisionRequest, error) {
-	q := s.d.gdb.Where("repo_id=?", repoID)
+func (s *CentralStore) ListRevisionRequests(namespaceID int64, state string) ([]*RevisionRequest, error) {
+	q := s.d.gdb.Where("namespace_id=?", namespaceID)
 	// "" and "all" both mean "no state filter"; any other value filters by it.
 	if state != "" && state != "all" {
 		q = q.Where("state=?", state)
@@ -140,16 +140,16 @@ func (s *CentralStore) ListRevisionRequests(repoID int64, state string) ([]*Revi
 }
 
 // UpdateRevisionRequestState sets an RR's state (open/stale/conflicted/merged/closed).
-func (s *CentralStore) UpdateRevisionRequestState(repoID, iid int64, state string) error {
-	return s.d.gdb.Model(&revisionRequestRow{}).Where("repo_id=? AND iid=?", repoID, iid).Updates(map[string]any{
+func (s *CentralStore) UpdateRevisionRequestState(namespaceID, iid int64, state string) error {
+	return s.d.gdb.Model(&revisionRequestRow{}).Where("namespace_id=? AND iid=?", namespaceID, iid).Updates(map[string]any{
 		"state": state, "updated": time.Now().UTC().UnixMilli(),
 	}).Error
 }
 
 // UpdateRevisionRequestPin re-pins an RR's source/base snapshots (the explicit
 // update path) and resets its state to open.
-func (s *CentralStore) UpdateRevisionRequestPin(repoID, iid int64, sourceSnapshot, baseSnapshot string) error {
-	return s.d.gdb.Model(&revisionRequestRow{}).Where("repo_id=? AND iid=?", repoID, iid).Updates(map[string]any{
+func (s *CentralStore) UpdateRevisionRequestPin(namespaceID, iid int64, sourceSnapshot, baseSnapshot string) error {
+	return s.d.gdb.Model(&revisionRequestRow{}).Where("namespace_id=? AND iid=?", namespaceID, iid).Updates(map[string]any{
 		"source_snapshot": sourceSnapshot, "base_snapshot": baseSnapshot,
 		"state": RROpen, "updated": time.Now().UTC().UnixMilli(),
 	}).Error
@@ -236,18 +236,18 @@ func (s *CentralStore) ListOpenRRSnapshots() ([]string, error) {
 	return out, nil
 }
 
-// RepoIDForRR returns the repo id owning an RR (for cross-repo GC resolution).
-func (s *CentralStore) RepoIDForRR(rrID int64) (int64, error) {
+// NamespaceIDForRR returns the repo id owning an RR (for cross-repo GC resolution).
+func (s *CentralStore) NamespaceIDForRR(rrID int64) (int64, error) {
 	var row revisionRequestRow
-	if err := s.d.gdb.Select("repo_id").First(&row, rrID).Error; err != nil {
+	if err := s.d.gdb.Select("namespace_id").First(&row, rrID).Error; err != nil {
 		return 0, err
 	}
-	return row.RepoID, nil
+	return row.NamespaceID, nil
 }
 
 func rrFromRow(row *revisionRequestRow) *RevisionRequest {
 	return &RevisionRequest{
-		ID: row.ID, RepoID: row.RepoID, IID: row.IID,
+		ID: row.ID, NamespaceID: row.NamespaceID, IID: row.IID,
 		SourceSnapshot: row.SourceSnapshot,
 		BaseSnapshot:   row.BaseSnapshot, TargetBranch: row.TargetBranch, Path: row.Path, State: row.State,
 		Title: row.Title, Body: row.Body, AuthorID: row.AuthorID,

@@ -19,11 +19,11 @@ func (r *Repo) PutSnapshot(snap *Snapshot) error {
 		Description: snap.Description,
 	})
 	row := &snapshotRow{
-		ID: snap.RevisionHash.String(), RepoID: r.repoID, RevisionID: snap.RevisionID,
+		ID: snap.RevisionHash.String(), NamespaceID: r.namespaceID, RevisionID: snap.RevisionID,
 		TreeID: snap.TreeID.String(), CommitTime: snap.CommitTime.UnixMilli(), Meta: meta,
 	}
 	return r.cs.d.gdb.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "repo_id"}, {Name: "sha"}},
+		Columns:   []clause.Column{{Name: "namespace_id"}, {Name: "sha"}},
 		UpdateAll: true,
 	}).Create(row).Error
 }
@@ -35,7 +35,7 @@ func (r *Repo) GetSnapshot(id object.ID) (*Snapshot, error) {
 
 func (r *Repo) getSnapshot(id object.ID) (*Snapshot, error) {
 	var row snapshotRow
-	err := r.cs.d.gdb.Where("repo_id=? AND sha=?", r.repoID, id.String()).First(&row).Error
+	err := r.cs.d.gdb.Where("namespace_id=? AND sha=?", r.namespaceID, id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}
@@ -70,11 +70,11 @@ func (r *Repo) PutSnapshotTx(tx *gorm.DB, snap *Snapshot) error {
 		Description: snap.Description,
 	})
 	row := &snapshotRow{
-		ID: snap.RevisionHash.String(), RepoID: r.repoID, RevisionID: snap.RevisionID,
+		ID: snap.RevisionHash.String(), NamespaceID: r.namespaceID, RevisionID: snap.RevisionID,
 		TreeID: snap.TreeID.String(), CommitTime: snap.CommitTime.UnixMilli(), Meta: meta,
 	}
 	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "repo_id"}, {Name: "sha"}},
+		Columns:   []clause.Column{{Name: "namespace_id"}, {Name: "sha"}},
 		UpdateAll: true,
 	}).Create(row).Error
 }

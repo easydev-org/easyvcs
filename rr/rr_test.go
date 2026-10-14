@@ -27,7 +27,7 @@ func newStore(t *testing.T) (*store.CentralStore, *store.Repo) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := cs.Create(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, err := cs.Create(store.NSRef{Name: "team" + "/" + "app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestConflictAndResolve(t *testing.T) {
 	if len(res.Conflicts) != 1 || res.Conflicts[0] != "f.txt" {
 		t.Fatalf("expected conflict at f.txt, got %v", res.Conflicts)
 	}
-	got, err := cs.GetRevisionRequest(repo.RepoID(), req.IID)
+	got, err := cs.GetRevisionRequest(repo.NamespaceID(), req.IID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestConflictAndResolve(t *testing.T) {
 	if _, err := svc.Resolve(got, "f.txt", 0, testAuthor(), testUserID()); err != nil {
 		t.Fatal(err)
 	}
-	got2, _ := cs.GetRevisionRequest(repo.RepoID(), req.IID)
+	got2, _ := cs.GetRevisionRequest(repo.NamespaceID(), req.IID)
 	if got2.State != store.RROpen {
 		t.Fatalf("state after resolve = %s, want open", got2.State)
 	}

@@ -28,7 +28,7 @@ var bucketMagic = []byte("EVCSBUN\x00")
 // Bundle is a serializable slice of a repository.
 type Bundle struct {
 	Version   int               `json:"version"`
-	Repo      store.RepoRef     `json:"repo"`
+	Repo      store.NSRef       `json:"repo"`
 	Revisions []*store.Revision `json:"changes"`
 	Snapshots []*store.Snapshot `json:"snapshots"`
 	Refs      []*store.Ref      `json:"refs"`
@@ -50,7 +50,7 @@ type ObjectRecord struct {
 // the concatenated raw object payloads.
 type binHeader struct {
 	Version      int               `json:"version"`
-	Repo         store.RepoRef     `json:"repo"`
+	Repo         store.NSRef       `json:"repo"`
 	Revisions    []*store.Revision `json:"changes"`
 	Snapshots    []*store.Snapshot `json:"snapshots"`
 	Refs         []*store.Ref      `json:"refs"`
@@ -222,7 +222,7 @@ func Collect(repo *store.Repo, have []string, hasObject func(id object.ID) bool)
 		haveSet[c] = true
 	}
 
-	b := &Bundle{Version: Version, Repo: repo.RepoRef()}
+	b := &Bundle{Version: Version, Repo: repo.NSRef()}
 	// Skip snapshots/changes that the destination already has (by revision id).
 	for _, ch := range changes {
 		if haveSet[ch.ID] {

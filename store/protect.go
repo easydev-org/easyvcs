@@ -15,8 +15,8 @@ const defaultProtectedBranchesJSON = `["main"]`
 // ProtectedBranches returns the branch names that may only change through a
 // merged Revision Request. An empty slice means no protection.
 func (r *Repo) ProtectedBranches() ([]string, error) {
-	var row repoRow
-	if err := r.cs.d.gdb.Select("protected_branches").First(&row, r.repoID).Error; err != nil {
+	var row namespaceRow
+	if err := r.cs.d.gdb.Select("protected_branches").First(&row, r.namespaceID).Error; err != nil {
 		return nil, err
 	}
 	return decodeProtectedBranches(row.ProtectedBranches), nil
@@ -43,7 +43,7 @@ func (r *Repo) SetProtectedBranches(branches []string) error {
 	if err != nil {
 		return err
 	}
-	return r.cs.d.gdb.Model(&repoRow{}).Where("id=?", r.repoID).Updates(map[string]any{
+	return r.cs.d.gdb.Model(&namespaceRow{}).Where("id=?", r.namespaceID).Updates(map[string]any{
 		"protected_branches": string(raw),
 	}).Error
 }

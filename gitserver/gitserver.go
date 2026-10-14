@@ -14,7 +14,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing"
@@ -242,14 +241,6 @@ func (b *builder) treeFor(treeID object.ID) (plumbing.Hash, error) {
 			gt.Entries = append(gt.Entries, gitobject.TreeEntry{Name: e.Name, Mode: filemode.Regular, Hash: bh})
 		}
 	}
-	// git REQUIRES tree entries in git's tree order (a directory is compared as
-	// if its name had a trailing "/"), which differs from the plain byte order
-	// SortedEntries() yields (e.g. "a.txt" < "a/" byte-wise, but "a/" < "a.txt"
-	// in git order). go-git's Tree.Encode REJECTS an out-of-order tree
-	// ("entries in tree are not sorted"), so re-sort before encoding.
-	sort.Slice(gt.Entries, func(i, j int) bool {
-		return gitTreeLess(gt.Entries[i], gt.Entries[j])
-	})
 	o := b.sto.NewEncodedObject()
 	if err := gt.Encode(o); err != nil {
 		return plumbing.ZeroHash, err
@@ -379,20 +370,4 @@ func RepoPath(path string) (ns, name string, ok bool) {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
-}
-
-// gitTreeLess orders two git tree entries by git's tree rules: compare names
-// byte-wise, but a DIRECTORY entry is treated as its name followed by '/'
-// (git's convention), so e.g. "a" (dir) sorts before "a.txt". This is the order
-// go-git's Tree.Encode requires.
-func gitTreeLess(a, b gitobject.TreeEntry) bool {
-	an := a.Name
-	if a.Mode == filemode.Dir {
-		an += "/"
-	}
-	bn := b.Name
-	if b.Mode == filemode.Dir {
-		bn += "/"
-	}
-	return an < bn
 }

@@ -235,12 +235,12 @@ func TestPathNormalization(t *testing.T) {
 	}
 }
 
-// Two different REPOSITORIES never share scope state (repo_id is part of the
+// Two different REPOSITORIES never share scope state (namespace_id is part of the
 // key throughout).
 func TestScopeRepoIsolation(t *testing.T) {
 	cs := newTestCentral(t)
-	r1, _ := cs.Create(RepoRef{Namespace: "n", Name: "r1"})
-	r2, _ := cs.Create(RepoRef{Namespace: "n", Name: "r2"})
+	r1, _ := cs.Create(NSRef{Name: "n-r1"})
+	r2, _ := cs.Create(NSRef{Name: "n-r2"})
 	_ = r1.PutRef(&Ref{Path: "frontend", Name: "main", Kind: RefBranch, Target: "one"})
 	_ = r2.PutRef(&Ref{Path: "frontend", Name: "main", Kind: RefBranch, Target: "two"})
 	if g, _ := r1.GetRefIn("frontend", "main"); g.Target != "one" {

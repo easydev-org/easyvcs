@@ -53,3 +53,19 @@ func stripScope(scope, path string) (string, bool) {
 	}
 	return rest, true
 }
+
+// topOf returns the first path segment of a container name ("team/app" -> "team").
+func topOf(name string) string {
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		return name[:i]
+	}
+	return name
+}
+
+// bottomOf returns the last path segment ("team/app" -> "app").
+func bottomOf(name string) string {
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}

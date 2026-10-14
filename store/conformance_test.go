@@ -9,7 +9,7 @@ import (
 // TestPushMirrorCRUD covers Put/Get/List/Delete/UpdateSync for push mirrors.
 func TestPushMirrorCRUD(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 
 	m := &PushMirror{Name: "github", URL: "git@x:repo.git", Branch: "main", Token: "tok"}
 	if err := repo.PutPushMirror(m); err != nil {
@@ -62,7 +62,7 @@ func TestPushMirrorCRUD(t *testing.T) {
 // TestRepoMetaRoundTrip and mirror detection.
 func TestRepoMetaRoundTrip(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 
 	def := RepoMeta{Description: "d", Visibility: "private", DefaultBranch: "main"}
 	if err := repo.UpdateRepoMeta(def); err != nil {
@@ -93,7 +93,7 @@ func TestRepoMetaRoundTrip(t *testing.T) {
 // SetRemoteDefaultBranch / ListRemoteRefs / DeleteRemoteRefsForRemote.
 func TestRemoteRefsLifecycle(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 
 	if err := repo.SetRemoteRef("origin", &RemoteRef{RemoteName: "origin", Kind: RefBranch, Name: "main", Target: "rev1"}); err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestRemoteRefsLifecycle(t *testing.T) {
 // TestObjectExistsAndRead covers ObjectExists on a written object.
 func TestObjectExistsAndRead(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	o := &object.Object{Kind: object.KindBlob, Blob: []byte("data")}
 	if err := repo.WriteObject(o); err != nil {
 		t.Fatal(err)

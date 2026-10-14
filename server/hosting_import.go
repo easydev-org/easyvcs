@@ -82,7 +82,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: a token is required"))
 		return
 	}
-	ns, name := r.PathValue("ns"), r.PathValue("name")
+	ns := nsRefName(r)
 	req, err := decodeJSONBody[importReq](r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -101,18 +101,27 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Open or create the destination repository.
-	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: name})
+	repo, err := s.cs.OpenRepo(store.NSRef{Name: ns})
 	if err != nil {
 		if !create {
 			writeErr(w, http.StatusNotFound, err)
 			return
 		}
-		// The org must be owned by (or claimable by) the caller.
+		// The namespace must be owned by (or claimable by) the caller: an exact
+		// match, or — for a slash-named name — its top segment. This stops a
+		// caller from creating "someoneelse/x".
 		if owner, oerr := s.cs.OwnerOfNamespace(ns); oerr == nil && owner != 0 && owner != u.ID {
-			writeErr(w, http.StatusConflict, errors.New("organization is owned by another user"))
+			writeErr(w, http.StatusConflict, errors.New("namespace is owned by another user"))
 			return
+		} else if oerr != nil || owner == 0 {
+			if top := topSegment(ns); top != ns {
+				if owner, oerr := s.cs.OwnerOfNamespace(top); oerr == nil && owner != 0 && owner != u.ID {
+					writeErr(w, http.StatusConflict, errors.New("namespace is owned by another user"))
+					return
+				}
+			}
 		}
-		repo, err = s.cs.Create(store.RepoRef{Owner: u.ID, Namespace: ns, Name: name})
+		repo, err = s.cs.Create(store.NSRef{Owner: u.ID, Name: ns})
 		if err != nil {
 			writeErr(w, http.StatusConflict, err)
 			return
@@ -126,8 +135,8 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Owner-level access on the destination.
-	if role, rerr := s.cs.RoleOf(repo.RepoID(), u.ID); rerr != nil || !role.CanPush() {
-		writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no import access to %s/%s", ns, name))
+	if role, rerr := s.cs.RoleOf(repo.NamespaceID(), u.ID); rerr != nil || !role.CanPush() {
+		writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no import access to %s", ns))
 		return
 	}
 
@@ -154,7 +163,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if ierr != nil {
 		// The raw error may embed a credential or the source URL's userinfo;
 		// log it and return a redacted message.
-		log.Printf("easyvcs-server: import %s/%s from %s: %v", ns, name, redactURL(req.URL), ierr)
+		log.Printf("easyvcs-server: import %s from %s: %v", ns, redactURL(req.URL), ierr)
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"ok":     false,
 			"error":  "import failed",
@@ -173,7 +182,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "org": ns, "repo": name, "branch": "main", "revisions": len(revIDs),
+		"ok": true, "namespace": ns, "branch": "main", "revisions": len(revIDs),
 	})
 }
 

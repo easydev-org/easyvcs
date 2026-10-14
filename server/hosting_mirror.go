@@ -180,11 +180,11 @@ func SyncAllPushMirrors(ctx context.Context, cs *store.CentralStore, timeout tim
 		return
 	}
 	for _, m := range mirrors {
-		// Resolve the repository from the mirror's RepoID (no compound label to
-		// split: AllPushMirrors returns the mirror's own Name + RepoID).
-		repoRef, err := cs.RepoRefByID(m.RepoID)
+		// Resolve the repository from the mirror's NamespaceID (no compound label to
+		// split: AllPushMirrors returns the mirror's own Name + NamespaceID).
+		repoRef, err := cs.NSRefByID(m.NamespaceID)
 		if err != nil {
-			log.Printf("push-mirror scheduler: repo %d: %v", m.RepoID, err)
+			log.Printf("push-mirror scheduler: repo %d: %v", m.NamespaceID, err)
 			continue
 		}
 		repo, err := cs.OpenRepo(repoRef)

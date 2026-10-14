@@ -11,52 +11,45 @@ import (
 	"gorm.io/gorm"
 )
 
-// Create creates a new repository and returns a repo-scoped handle. The
-// namespace is globally unique and owned by the user in RepoRef.Owner; owner 0
-// creates an unowned, public dev repo (no ACLs). The owner is denormalized into
-// owner_user_id.
-func (s *CentralStore) Create(r RepoRef) (*Repo, error) {
-	if r.Owner != 0 {
-		if err := s.EnsureNamespace(r.Owner, r.Namespace); err != nil {
-			return nil, err
-		}
-	}
+// Create creates a new NAMESPACE (the single container) and returns its handle.
+// The name is globally unique and owned by the user in NSRef.Owner; owner 0
+// creates an unowned, public dev namespace (no ACLs). See
+// docs/namespace-container.md — there is no separate repository entity.
+func (s *CentralStore) Create(r NSRef) (*Repo, error) {
 	var count int64
-	if err := s.d.gdb.Model(&repoRow{}).Where("namespace=? AND name=?", r.Namespace, r.Name).Count(&count).Error; err != nil {
+	if err := s.d.gdb.Model(&namespaceRow{}).Where("name=?", r.Name).Count(&count).Error; err != nil {
 		return nil, err
 	}
 	if count > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrRepoExists, r)
 	}
-	// New repositories are PRIVATE by default (multi-tenant safety: a repo is
-	// only visible to its owner/members until the caller explicitly publishes
-	// it). They also protect `main` by default: it may only change through a
-	// merged Revision Request (direct push is refused). See store/protect.go.
-	row := &repoRow{OwnerUserID: r.Owner, Namespace: r.Namespace, Name: r.Name, Created: time.Now().UTC().UnixMilli(), Visibility: "private", ProtectedBranches: defaultProtectedBranchesJSON}
-	if err := s.d.gdb.Create(row).Error; err != nil {
+	// New namespaces are PRIVATE by default and protect `main` (only a merged RR
+	// may change it). See store/protect.go.
+	row := namespaceRow{OwnerUserID: r.Owner, Name: r.Name, Created: time.Now().UTC().UnixMilli(), Visibility: "private", DefaultBranch: "main", Kind: "normal", ProtectedBranches: defaultProtectedBranchesJSON}
+	if err := s.d.gdb.Create(&row).Error; err != nil {
 		return nil, err
 	}
-	return &Repo{cs: s, repoID: row.ID, OwnerUserID: row.OwnerUserID, Namespace: r.Namespace, Name: r.Name}, nil
+	return &Repo{cs: s, namespaceID: row.ID, OwnerUserID: row.OwnerUserID, Name: r.Name}, nil
 }
 
-// OpenRepo opens an existing repository by namespace/name (global). Returns
-// ErrRepoNotFound if missing.
-func (s *CentralStore) OpenRepo(r RepoRef) (*Repo, error) {
-	var row repoRow
-	err := s.d.gdb.Where("namespace=? AND name=?", r.Namespace, r.Name).First(&row).Error
+// OpenRepo opens an existing namespace by name. Returns ErrRepoNotFound if
+// missing.
+func (s *CentralStore) OpenRepo(r NSRef) (*Repo, error) {
+	var row namespaceRow
+	err := s.d.gdb.Where("name=?", r.Name).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("%w: %s", ErrRepoNotFound, r)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &Repo{cs: s, repoID: row.ID, OwnerUserID: row.OwnerUserID, Namespace: r.Namespace, Name: r.Name}, nil
+	return &Repo{cs: s, namespaceID: row.ID, OwnerUserID: row.OwnerUserID, Name: r.Name}, nil
 }
 
-// RepoExists reports whether a repository exists (namespace/name is global).
-func (s *CentralStore) RepoExists(r RepoRef) (bool, error) {
+// RepoExists reports whether a namespace exists.
+func (s *CentralStore) RepoExists(r NSRef) (bool, error) {
 	var count int64
-	if err := s.d.gdb.Model(&repoRow{}).Where("namespace=? AND name=?", r.Namespace, r.Name).Count(&count).Error; err != nil {
+	if err := s.d.gdb.Model(&namespaceRow{}).Where("name=?", r.Name).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil
@@ -65,54 +58,54 @@ func (s *CentralStore) RepoExists(r RepoRef) (bool, error) {
 // Delete removes a repository and all of its scoped metadata. Reviews and
 // comments are removed via a subquery on the repo's MR ids; any failure is
 // returned (no silent partial deletes).
-func (s *CentralStore) Delete(r RepoRef) error {
+func (s *CentralStore) Delete(r NSRef) error {
 	repo, err := s.OpenRepo(r)
 	if err != nil {
 		return err
 	}
-	for _, table := range []any{&snapshotRow{}, &revisionRow{}, &refRow{}, &remoteRow{}, &remoteRefRow{}, &pushMirrorRow{}, &workspaceRow{}, &gitRevisionLinkRow{}, &repoMemberRow{}} {
-		if err := s.d.gdb.Where("repo_id=?", repo.repoID).Delete(table).Error; err != nil {
+	for _, table := range []any{&snapshotRow{}, &revisionRow{}, &refRow{}, &remoteRow{}, &remoteRefRow{}, &pushMirrorRow{}, &workspaceRow{}, &gitRevisionLinkRow{}, &namespaceMemberRow{}} {
+		if err := s.d.gdb.Where("namespace_id=?", repo.namespaceID).Delete(table).Error; err != nil {
 			return err
 		}
 	}
 	// Collaboration is Revision Requests, scoped to the repo: clean the RRs and
 	// their reviews/comments/updates/merge rows.
-	rrIDs := s.d.gdb.Model(&revisionRequestRow{}).Select("id").Where("repo_id=?", repo.repoID)
+	rrIDs := s.d.gdb.Model(&revisionRequestRow{}).Select("id").Where("namespace_id=?", repo.namespaceID)
 	for _, table := range []any{&rrReviewRow{}, &rrCommentRow{}, &rrUpdateRow{}, &rrMergeRow{}} {
 		if err := s.d.gdb.Where("rr_id IN (?)", rrIDs).Delete(table).Error; err != nil {
 			return err
 		}
 	}
-	if err := s.d.gdb.Where("repo_id=?", repo.repoID).Delete(&revisionRequestRow{}).Error; err != nil {
+	if err := s.d.gdb.Where("namespace_id=?", repo.namespaceID).Delete(&revisionRequestRow{}).Error; err != nil {
 		return err
 	}
-	if err := s.d.gdb.Delete(&repoRow{}, repo.repoID).Error; err != nil {
+	if err := s.d.gdb.Delete(&namespaceRow{}, repo.namespaceID).Error; err != nil {
 		return err
 	}
 	return nil
 }
 
 // ListForOwner returns every repository owned by one user.
-func (s *CentralStore) ListForOwner(owner int64) ([]RepoRef, error) {
-	var rows []repoRow
+func (s *CentralStore) ListForOwner(owner int64) ([]NSRef, error) {
+	var rows []namespaceRow
 	if err := s.d.gdb.Where("owner_user_id=?", owner).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	refs := make([]RepoRef, 0, len(rows))
+	refs := make([]NSRef, 0, len(rows))
 	for _, row := range rows {
-		refs = append(refs, RepoRef{Owner: row.OwnerUserID, Namespace: row.Namespace, Name: row.Name})
+		refs = append(refs, NSRef{Owner: row.OwnerUserID, Name: row.Name})
 	}
 	return refs, nil
 }
 
-func (s *CentralStore) List() ([]RepoRef, error) {
-	var rows []repoRow
-	if err := s.d.gdb.Order("namespace, name").Find(&rows).Error; err != nil {
+func (s *CentralStore) List() ([]NSRef, error) {
+	var rows []namespaceRow
+	if err := s.d.gdb.Order("name").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make([]RepoRef, 0, len(rows))
+	out := make([]NSRef, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, RepoRef{Owner: r.OwnerUserID, Namespace: r.Namespace, Name: r.Name})
+		out = append(out, NSRef{Owner: r.OwnerUserID, Name: r.Name})
 	}
 	return out, nil
 }
@@ -121,37 +114,37 @@ func (s *CentralStore) List() ([]RepoRef, error) {
 // never another tenant's public repos. It backs `GET /repos?owned=true`, which
 // a tenant-scoped client (e.g. agent-gateway) uses to enumerate exactly what it
 // may act on, without the cross-tenant noise ListAccessible includes.
-func (s *CentralStore) ListOwned(userID int64) ([]RepoRef, error) {
-	var rows []repoRow
+func (s *CentralStore) ListOwned(userID int64) ([]NSRef, error) {
+	var rows []namespaceRow
 	q := s.d.gdb.Where(
-		"owner_user_id = ? OR id IN (SELECT repo_id FROM repo_members WHERE user_id = ?)",
+		"owner_user_id = ? OR id IN (SELECT namespace_id FROM namespace_members WHERE user_id = ?)",
 		userID, userID)
-	if err := q.Order("namespace, name").Find(&rows).Error; err != nil {
+	if err := q.Order("name").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make([]RepoRef, 0, len(rows))
+	out := make([]NSRef, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, RepoRef{Owner: r.OwnerUserID, Namespace: r.Namespace, Name: r.Name})
+		out = append(out, NSRef{Owner: r.OwnerUserID, Name: r.Name})
 	}
 	return out, nil
 }
 
 // ListAccessible returns every repository a user may READ: public repos (any
 // owner) plus private repos where the user is the owner or a repo member.
-func (s *CentralStore) ListAccessible(userID int64) ([]RepoRef, error) {
-	var rows []repoRow
+func (s *CentralStore) ListAccessible(userID int64) ([]NSRef, error) {
+	var rows []namespaceRow
 	q := s.d.gdb.Where("visibility != ?", "private")
 	if userID != 0 {
 		q = s.d.gdb.Where(
-			"visibility != ? OR owner_user_id = ? OR id IN (SELECT repo_id FROM repo_members WHERE user_id = ?)",
+			"visibility != ? OR owner_user_id = ? OR id IN (SELECT namespace_id FROM namespace_members WHERE user_id = ?)",
 			"private", userID, userID)
 	}
-	if err := q.Order("namespace, name").Find(&rows).Error; err != nil {
+	if err := q.Order("name").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make([]RepoRef, 0, len(rows))
+	out := make([]NSRef, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, RepoRef{Owner: r.OwnerUserID, Namespace: r.Namespace, Name: r.Name})
+		out = append(out, NSRef{Owner: r.OwnerUserID, Name: r.Name})
 	}
 	return out, nil
 }
@@ -159,12 +152,12 @@ func (s *CentralStore) ListAccessible(userID int64) ([]RepoRef, error) {
 // ListOwnedInfo is ListOwned plus each repo's Visibility and DefaultBranch.
 // The list endpoints return these so a client does not have to GET every repo
 // individually (the fields already live on the row the list query loads).
-func (s *CentralStore) ListOwnedInfo(userID int64) ([]RepoInfo, error) {
-	var rows []repoRow
+func (s *CentralStore) ListOwnedInfo(userID int64) ([]NSInfo, error) {
+	var rows []namespaceRow
 	q := s.d.gdb.Where(
-		"owner_user_id = ? OR id IN (SELECT repo_id FROM repo_members WHERE user_id = ?)",
+		"owner_user_id = ? OR id IN (SELECT namespace_id FROM namespace_members WHERE user_id = ?)",
 		userID, userID)
-	if err := q.Order("namespace, name").Find(&rows).Error; err != nil {
+	if err := q.Order("name").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return repoInfos(rows), nil
@@ -172,25 +165,25 @@ func (s *CentralStore) ListOwnedInfo(userID int64) ([]RepoInfo, error) {
 
 // ListAccessibleInfo is ListAccessible plus each repo's Visibility and
 // DefaultBranch (see ListOwnedInfo).
-func (s *CentralStore) ListAccessibleInfo(userID int64) ([]RepoInfo, error) {
-	var rows []repoRow
+func (s *CentralStore) ListAccessibleInfo(userID int64) ([]NSInfo, error) {
+	var rows []namespaceRow
 	q := s.d.gdb.Where("visibility != ?", "private")
 	if userID != 0 {
 		q = s.d.gdb.Where(
-			"visibility != ? OR owner_user_id = ? OR id IN (SELECT repo_id FROM repo_members WHERE user_id = ?)",
+			"visibility != ? OR owner_user_id = ? OR id IN (SELECT namespace_id FROM namespace_members WHERE user_id = ?)",
 			"private", userID, userID)
 	}
-	if err := q.Order("namespace, name").Find(&rows).Error; err != nil {
+	if err := q.Order("name").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return repoInfos(rows), nil
 }
 
-func repoInfos(rows []repoRow) []RepoInfo {
-	out := make([]RepoInfo, 0, len(rows))
+func repoInfos(rows []namespaceRow) []NSInfo {
+	out := make([]NSInfo, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, RepoInfo{
-			RepoRef:       RepoRef{Owner: r.OwnerUserID, Namespace: r.Namespace, Name: r.Name},
+		out = append(out, NSInfo{
+			NSRef:         NSRef{Owner: r.OwnerUserID, Name: r.Name},
 			Visibility:    r.Visibility,
 			DefaultBranch: r.DefaultBranch,
 		})
@@ -201,7 +194,7 @@ func repoInfos(rows []repoRow) []RepoInfo {
 // Fork copies a repository's scoped data (snapshots, revisions, refs) plus its
 // hosting metadata into a new (namespace, name), sharing the global object
 // store. The source repository is left untouched. It returns the new repo.
-func (s *CentralStore) Fork(src RepoRef, dst RepoRef) (*Repo, error) {
+func (s *CentralStore) Fork(src NSRef, dst NSRef) (*Repo, error) {
 	srcRepo, err := s.OpenRepo(src)
 	if err != nil {
 		return nil, err
@@ -230,7 +223,7 @@ func (s *CentralStore) Fork(src RepoRef, dst RepoRef) (*Repo, error) {
 	var remap = map[string]string{} // old revision id -> new revision id
 
 	var snapRows []snapshotRow
-	if err := s.d.gdb.Where("repo_id=?", srcRepo.repoID).Find(&snapRows).Error; err != nil {
+	if err := s.d.gdb.Where("namespace_id=?", srcRepo.namespaceID).Find(&snapRows).Error; err != nil {
 		return nil, err
 	}
 	type snapRec struct {
@@ -244,7 +237,7 @@ func (s *CentralStore) Fork(src RepoRef, dst RepoRef) (*Repo, error) {
 	}
 
 	var revRows []revisionRow
-	if err := s.d.gdb.Where("repo_id=?", srcRepo.repoID).Find(&revRows).Error; err != nil {
+	if err := s.d.gdb.Where("namespace_id=?", srcRepo.namespaceID).Find(&revRows).Error; err != nil {
 		return nil, err
 	}
 	type revRec struct {
@@ -359,7 +352,7 @@ func (s *CentralStore) Fork(src RepoRef, dst RepoRef) (*Repo, error) {
 
 	// Write remapped refs (branch/tag targets -> new revision id).
 	var refRows []refRow
-	if err := s.d.gdb.Where("repo_id=?", srcRepo.repoID).Find(&refRows).Error; err != nil {
+	if err := s.d.gdb.Where("namespace_id=?", srcRepo.namespaceID).Find(&refRows).Error; err != nil {
 		return nil, err
 	}
 	for _, rr := range refRows {
@@ -379,16 +372,16 @@ func mustHexID(s string) object.ID {
 	return id
 }
 
-// RepoRefByID resolves a repository id to its RepoRef (namespace/name/owner).
-func (s *CentralStore) RepoRefByID(id int64) (RepoRef, error) {
-	var row repoRow
+// NSRefByID resolves a repository id to its NSRef (namespace/name/owner).
+func (s *CentralStore) NSRefByID(id int64) (NSRef, error) {
+	var row namespaceRow
 	if err := s.d.gdb.Where("id=?", id).First(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return RepoRef{}, ErrRepoNotFound
+			return NSRef{}, ErrRepoNotFound
 		}
-		return RepoRef{}, err
+		return NSRef{}, err
 	}
-	return RepoRef{Owner: row.OwnerUserID, Namespace: row.Namespace, Name: row.Name}, nil
+	return NSRef{Owner: row.OwnerUserID, Name: row.Name}, nil
 }
 
 // BeginTx starts a GORM transaction on the central store.

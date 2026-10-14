@@ -34,7 +34,7 @@ func TestRoleCapabilities(t *testing.T) {
 func TestSecretEncryptionRoundTrip(t *testing.T) {
 	cs := newTestCentral(t)
 	owner, _ := cs.CreateUser("owner", "Owner")
-	repo, _ := cs.Create(RepoRef{Owner: owner.ID, Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Owner: owner.ID, Name: "n/r"})
 
 	// Without a key: plaintext round-trip.
 	_ = repo.PutRemote("origin", "http://x", "tok123")
@@ -62,7 +62,7 @@ func TestSecretEncryptionRoundTrip(t *testing.T) {
 	}
 	// The stored value must not be the plaintext.
 	var row remoteRow
-	_ = cs.d.gdb.Where("repo_id=? AND name=?", repo.repoID, "origin").First(&row).Error
+	_ = cs.d.gdb.Where("namespace_id=? AND name=?", repo.namespaceID, "origin").First(&row).Error
 	if row.Token != nil && *row.Token == "secret567" {
 		t.Fatal("token stored in plaintext despite key set")
 	}

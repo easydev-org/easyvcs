@@ -16,7 +16,7 @@ func TestGitInfoRefsRoot(t *testing.T) {
 
 	// Root repo: the MOST common clone path — must be 200 (advertisement).
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/repos/team/app/info/refs?service=git-upload-pack", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/app/info/refs?service=git-upload-pack", nil)
 	r.Header.Set("Authorization", "Bearer "+token)
 	mux.ServeHTTP(rec, r)
 	if rec.Code != http.StatusOK {
@@ -35,7 +35,7 @@ func TestGitInfoRefsRoot(t *testing.T) {
 
 	// A ".git"-suffixed root clone URL must resolve too.
 	rec = httptest.NewRecorder()
-	r = httptest.NewRequest(http.MethodGet, "/api/v1/repos/team/app.git/info/refs?service=git-upload-pack", nil)
+	r = httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/app.git/info/refs?service=git-upload-pack", nil)
 	r.Header.Set("Authorization", "Bearer "+token)
 	mux.ServeHTTP(rec, r)
 	if rec.Code != http.StatusOK {
@@ -44,7 +44,7 @@ func TestGitInfoRefsRoot(t *testing.T) {
 
 	// A non-git subpath is not the git endpoint -> 404.
 	rec = httptest.NewRecorder()
-	r = httptest.NewRequest(http.MethodGet, "/api/v1/repos/team/app/not-a-git-path", nil)
+	r = httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/app/not-a-git-path", nil)
 	r.Header.Set("Authorization", "Bearer "+token)
 	mux.ServeHTTP(rec, r)
 	if rec.Code != http.StatusNotFound {

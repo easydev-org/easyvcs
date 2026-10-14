@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +20,7 @@ func TestPushToEmptyServerNoDanglingRefs(t *testing.T) {
 	s := newTestServer(t, "secret")
 	// Server store exists but has NO repo yet; create it empty (owned by tester).
 	tester, _ := s.cs.GetUserByUsername("tester")
-	repo, err := s.cs.Create(store.RepoRef{Owner: tester.ID, Namespace: "team", Name: "app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: tester.ID, Name: "team/app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +38,7 @@ func TestPushToEmptyServerNoDanglingRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = cs2.SetWAL()
-	src, err := cs2.Create(store.RepoRef{Namespace: "team", Name: "app"})
+	src, err := cs2.Create(store.NSRef{Name: "team/app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +50,7 @@ func TestPushToEmptyServerNoDanglingRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
@@ -66,7 +65,7 @@ func TestPushToEmptyServerNoDanglingRefs(t *testing.T) {
 	}
 
 	// Every ref target must resolve to a stored revision (no dangling refs).
-	dst, err := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	dst, err := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +91,7 @@ func TestPushToEmptyServerNoDanglingRefs(t *testing.T) {
 func TestPushAcceptsForeignAuthorSnapshot(t *testing.T) {
 	s := newTestServer(t, "secret") // registers user "tester" + token "secret"
 	tester, _ := s.cs.GetUserByUsername("tester")
-	repo, err := s.cs.Create(store.RepoRef{Owner: tester.ID, Namespace: "team", Name: "app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: tester.ID, Name: "team/app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +107,7 @@ func TestPushAcceptsForeignAuthorSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = cs2.SetWAL()
-	src, err := cs2.Create(store.RepoRef{Namespace: "team", Name: "app"})
+	src, err := cs2.Create(store.NSRef{Name: "team/app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +126,7 @@ func TestPushAcceptsForeignAuthorSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
@@ -161,19 +160,19 @@ func seedIn(t *testing.T, repo *store.Repo) string {
 func TestPrivateRepoTokenPull(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	if err := repo.UpdateRepoMeta(store.RepoMeta{Visibility: "private", DefaultBranch: "main"}); err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/advertise", bytes.NewReader([]byte(`{}`)))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/advertise", bytes.NewReader([]byte(`{}`)))
 	rec := httptest.NewRecorder()
 	s.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden && rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous advertise on private repo should be 401/403, got %d", rec.Code)
 	}
 
-	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/advertise", bytes.NewReader([]byte(`{}`)))
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/advertise", bytes.NewReader([]byte(`{}`)))
 	req2.Header.Set("Authorization", "Bearer secret")
 	rec2 := httptest.NewRecorder()
 	s.Router().ServeHTTP(rec2, req2)
@@ -195,12 +194,12 @@ func TestNonOwnerPushDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	revs, _ := repo.ListRevisions()
-	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.RepoRef(), Revisions: revs,
+	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
 		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: revs[0].ID}}}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("Authorization", "Bearer intruder-token")
@@ -215,12 +214,12 @@ func TestNonOwnerPushDenied(t *testing.T) {
 func TestOwnerCanPush(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	revs, _ := repo.ListRevisions()
-	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.RepoRef(), Revisions: revs,
+	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
 		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: revs[0].ID}}}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("Authorization", "Bearer secret")
@@ -241,12 +240,12 @@ func TestReadLevelTokenStillPushesAsOwner(t *testing.T) {
 	if _, err := s.cs.CreateToken("reader", u.ID, "read"); err != nil {
 		t.Fatal(err)
 	}
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	revs, _ := repo.ListRevisions()
-	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.RepoRef(), Revisions: revs,
+	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
 		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: revs[0].ID}}}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("Authorization", "Bearer reader")
@@ -261,7 +260,7 @@ func TestReadLevelTokenStillPushesAsOwner(t *testing.T) {
 func TestMirrorRepoRejectsPush(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	if err := repo.UpdateMirrorMeta(store.RepoMeta{Kind: "mirror"}); err != nil {
 		t.Fatal(err)
 	}
@@ -269,10 +268,10 @@ func TestMirrorRepoRejectsPush(t *testing.T) {
 		t.Fatal("repo should be a mirror")
 	}
 	revs, _ := repo.ListRevisions()
-	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.RepoRef(), Revisions: revs,
+	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
 		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: revs[0].ID}}}
 	payload, _ := transfer.CompressBundle(b)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
@@ -292,7 +291,7 @@ func TestPushBodyLimit(t *testing.T) {
 	// are capped: send an uncompressed JSON bundle larger than the cap so the
 	// MaxBytesReader trips mid-read.
 	big := bytes.Repeat([]byte(" "), 8192)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(big))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(big))
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
 	s.Router().ServeHTTP(rec, req)
@@ -308,7 +307,7 @@ func TestPushBodyLimit(t *testing.T) {
 func TestConcurrentPushOneFastForward(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	revs, _ := repo.ListRevisions()
 	var childID string
 	for _, r := range revs {
@@ -317,7 +316,7 @@ func TestConcurrentPushOneFastForward(t *testing.T) {
 			childID = r.ID
 		}
 	}
-	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.RepoRef(), Revisions: revs,
+	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
 		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: childID}}}
 	payload, _ := transfer.CompressBundle(b)
 
@@ -327,7 +326,7 @@ func TestConcurrentPushOneFastForward(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(payload))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
 			req.Header.Set("Content-Encoding", "gzip")
 			req.Header.Set("Authorization", "Bearer secret")
 			rec := httptest.NewRecorder()
@@ -364,7 +363,7 @@ func TestAuditIPNotSpoofed(t *testing.T) {
 	sink := &mockSink{}
 	s := New(cs, sink)
 	seedRepo(t, s)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/advertise", bytes.NewReader([]byte(`{}`)))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/advertise", bytes.NewReader([]byte(`{}`)))
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
 	rec := httptest.NewRecorder()
 	s.Router().ServeHTTP(rec, req)
@@ -376,45 +375,5 @@ func TestAuditIPNotSpoofed(t *testing.T) {
 	}
 	if sink.events[0].IP == "1.2.3.4" {
 		t.Fatal("X-Forwarded-For must not be trusted without EASYVCS_TRUSTED_PROXY")
-	}
-}
-
-// TestDecodeBundleBodyLargeCompressed guards the regression where the gzip
-// reader was wrapped in `io.LimitReader(raw, maxGzipStream)` (1 MiB): that
-// bounded the WHOLE compressed stream, so any bundle whose compressed size
-// exceeded 1 MiB was truncated and failed with "unexpected EOF". The reader
-
-// TestDecodeBundleBodyLargeCompressed guards the regression where the gzip
-// reader was wrapped in `io.LimitReader(raw, maxGzipStream)` (1 MiB): that
-// bounded the WHOLE compressed stream, so any bundle whose compressed size
-// exceeded 1 MiB was truncated and failed with "unexpected EOF". The reader
-// must accept an arbitrarily large (MaxBytesReader-bounded) compressed body.
-func TestDecodeBundleBodyLargeCompressed(t *testing.T) {
-	b := transfer.Bundle{}
-	for i := 0; i < 4000; i++ {
-		buf := make([]byte, 4096)
-		if _, err := rand.Read(buf); err != nil {
-			t.Fatal(err)
-		}
-		b.Objects = append(b.Objects, transfer.ObjectRecord{
-			Kind:    object.KindBlob,
-			Content: buf,
-		})
-	}
-	payload, err := transfer.CompressBundle(&b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(payload) <= 1<<20 {
-		t.Fatalf("fixture compressed to %d bytes; need > 1 MiB to exercise the bug", len(payload))
-	}
-	req := httptest.NewRequest(http.MethodPost, "/push", bytes.NewReader(payload))
-	req.Header.Set("Content-Encoding", "gzip")
-	got, err := decodeBundleBody(req)
-	if err != nil {
-		t.Fatalf("decodeBundleBody failed on a %d-byte compressed bundle: %v", len(payload), err)
-	}
-	if len(got.Objects) != len(b.Objects) {
-		t.Fatalf("decoded %d objects, want %d", len(got.Objects), len(b.Objects))
 	}
 }

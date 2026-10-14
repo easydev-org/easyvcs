@@ -16,7 +16,7 @@ import (
 func (r *Repo) PutRevision(rev *Revision) error {
 	row := r.toRevisionRow(rev)
 	if err := r.cs.d.gdb.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "repo_id"}, {Name: "id"}},
+		Columns:   []clause.Column{{Name: "namespace_id"}, {Name: "id"}},
 		UpdateAll: true,
 	}).Create(row).Error; err != nil {
 		return err
@@ -28,7 +28,7 @@ func (r *Repo) PutRevision(rev *Revision) error {
 func (r *Repo) PutRevisionTx(tx *gorm.DB, rev *Revision) error {
 	row := r.toRevisionRow(rev)
 	if err := tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "repo_id"}, {Name: "id"}},
+		Columns:   []clause.Column{{Name: "namespace_id"}, {Name: "id"}},
 		UpdateAll: true,
 	}).Create(row).Error; err != nil {
 		return err
@@ -44,7 +44,7 @@ func (r *Repo) indexRevisionPaths(rev *Revision) error {
 }
 
 func (r *Repo) indexRevisionPathsTx(tx *gorm.DB, rev *Revision) error {
-	if err := tx.Where("repo_id=? AND revision_id=?", r.repoID, rev.ID).
+	if err := tx.Where("namespace_id=? AND revision_id=?", r.namespaceID, rev.ID).
 		Delete(&revisionPathDirRow{}).Error; err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func (r *Repo) indexRevisionPathsTx(tx *gorm.DB, rev *Revision) error {
 	}
 	rows := make([]revisionPathDirRow, 0, len(dirs))
 	for d := range dirs {
-		rows = append(rows, revisionPathDirRow{RepoID: r.repoID, Dir: d, RevisionID: rev.ID})
+		rows = append(rows, revisionPathDirRow{NamespaceID: r.namespaceID, Dir: d, RevisionID: rev.ID})
 	}
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error
 }
@@ -90,7 +90,7 @@ func (r *Repo) RevisionsTouching(dir string) ([]string, error) {
 	// Lazy backfill: revisions written before the index existed have no rows.
 	// Build it once from the persisted changed_paths (cheap, one-time per repo).
 	var n int64
-	if err := r.cs.d.gdb.Model(&revisionPathDirRow{}).Where("repo_id=?", r.repoID).Count(&n).Error; err != nil {
+	if err := r.cs.d.gdb.Model(&revisionPathDirRow{}).Where("namespace_id=?", r.namespaceID).Count(&n).Error; err != nil {
 		return nil, err
 	}
 	if n == 0 {
@@ -99,7 +99,7 @@ func (r *Repo) RevisionsTouching(dir string) ([]string, error) {
 		}
 	}
 	var rows []revisionPathDirRow
-	if err := r.cs.d.gdb.Where("repo_id=? AND dir=?", r.repoID, dir).
+	if err := r.cs.d.gdb.Where("namespace_id=? AND dir=?", r.namespaceID, dir).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -115,18 +115,18 @@ func (r *Repo) RevisionsTouching(dir string) ([]string, error) {
 // repositories whose revisions predate the index.
 func (r *Repo) ReindexPathDirs() error {
 	var rows []revisionRow
-	if err := r.cs.d.gdb.Where("repo_id=?", r.repoID).Find(&rows).Error; err != nil {
+	if err := r.cs.d.gdb.Where("namespace_id=?", r.namespaceID).Find(&rows).Error; err != nil {
 		return err
 	}
 	return r.cs.d.gdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("repo_id=?", r.repoID).Delete(&revisionPathDirRow{}).Error; err != nil {
+		if err := tx.Where("namespace_id=?", r.namespaceID).Delete(&revisionPathDirRow{}).Error; err != nil {
 			return err
 		}
 		for _, row := range rows {
 			dirs := changedPathDirs(decodeChangedPathsJSON(row.ChangedPath))
 			batch := make([]revisionPathDirRow, 0, len(dirs))
 			for d := range dirs {
-				batch = append(batch, revisionPathDirRow{RepoID: r.repoID, Dir: d, RevisionID: row.ID})
+				batch = append(batch, revisionPathDirRow{NamespaceID: r.namespaceID, Dir: d, RevisionID: row.ID})
 			}
 			if len(batch) > 0 {
 				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&batch).Error; err != nil {
@@ -142,7 +142,7 @@ func (r *Repo) ReindexPathDirs() error {
 func (r *Repo) toRevisionRow(rev *Revision) *revisionRow {
 	changed, _ := json.Marshal(rev.ChangedPaths)
 	return &revisionRow{
-		RepoID: r.repoID, ID: rev.ID, Hash: rev.Hash.String(),
+		NamespaceID: r.namespaceID, ID: rev.ID, Hash: rev.Hash.String(),
 		Created: rev.Created.UnixMilli(), ForkFrom: rev.ForkFrom, ChangedPath: changed,
 	}
 }
@@ -150,7 +150,7 @@ func (r *Repo) toRevisionRow(rev *Revision) *revisionRow {
 // GetRevision reads a revision scoped to this repository.
 func (r *Repo) GetRevision(id string) (*Revision, error) {
 	var row revisionRow
-	err := r.cs.d.gdb.Where("repo_id=? AND id=?", r.repoID, id).First(&row).Error
+	err := r.cs.d.gdb.Where("namespace_id=? AND id=?", r.namespaceID, id).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}
@@ -208,7 +208,7 @@ func (r *Repo) UpdateRevisionHashCAS(revisionID string, expectHash, newHash obje
 // ListRevisions lists revisions scoped to this repository.
 func (r *Repo) ListRevisions() ([]*Revision, error) {
 	var rows []revisionRow
-	if err := r.cs.d.gdb.Where("repo_id=?", r.repoID).Order("id").Find(&rows).Error; err != nil {
+	if err := r.cs.d.gdb.Where("namespace_id=?", r.namespaceID).Order("id").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*Revision, 0, len(rows))

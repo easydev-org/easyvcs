@@ -21,9 +21,9 @@ const WorkspaceMarkerFile = ".easyvcs-workspace"
 // (home path and optional DSN) so a workspace is self-describing even when its
 // store lives outside the process's EASYVCS_HOME.
 type WorkspaceMarker struct {
-	Repo            RepoRef `json:"repo"`
-	CurrentRevision string  `json:"current_revision"`
-	Branch          string  `json:"branch,omitempty"`
+	Repo            NSRef  `json:"repo"`
+	CurrentRevision string `json:"current_revision"`
+	Branch          string `json:"branch,omitempty"`
 	// IgnoreHash is retained for JSON backward compatibility but is no longer
 	// written or read: ignore rules affect only NEW commits, never history.
 	IgnoreHash string `json:"ignore_hash,omitempty"`
@@ -105,7 +105,7 @@ func WriteMarker(dir string, m *WorkspaceMarker) error {
 // WorkspaceRow is the workspaces table entry tracking a registered workspace.
 type WorkspaceRow struct {
 	Path            string
-	Repo            RepoRef
+	Repo            NSRef
 	CurrentRevision string
 	Branch          string
 }
@@ -116,7 +116,7 @@ func (s *CentralStore) PutWorkspace(w *WorkspaceRow) error {
 	if err != nil {
 		return err
 	}
-	row := &workspaceRow{Path: w.Path, RepoID: repo.repoID, CurrentRevision: nullable(w.CurrentRevision), Branch: nullable(w.Branch)}
+	row := &workspaceRow{Path: w.Path, NamespaceID: repo.namespaceID, CurrentRevision: nullable(w.CurrentRevision), Branch: nullable(w.Branch)}
 	return s.d.gdb.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "path"}},
 		UpdateAll: true,
@@ -133,7 +133,7 @@ func (s *CentralStore) GetWorkspaceByPath(path string) (*WorkspaceRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	repo, err := s.repoByID(row.RepoID)
+	repo, err := s.repoByID(row.NamespaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (s *CentralStore) ListWorkspaces() ([]*WorkspaceRow, error) {
 	}
 	out := []*WorkspaceRow{}
 	for i := range rows {
-		repo, err := s.repoByID(rows[i].RepoID)
+		repo, err := s.repoByID(rows[i].NamespaceID)
 		if err != nil {
 			continue
 		}
@@ -159,12 +159,12 @@ func (s *CentralStore) ListWorkspaces() ([]*WorkspaceRow, error) {
 	return out, nil
 }
 
-func (s *CentralStore) repoByID(id int64) (RepoRef, error) {
-	var row repoRow
+func (s *CentralStore) repoByID(id int64) (NSRef, error) {
+	var row namespaceRow
 	if err := s.d.gdb.Where("id=?", id).First(&row).Error; err != nil {
-		return RepoRef{}, err
+		return NSRef{}, err
 	}
-	return RepoRef{Owner: row.OwnerUserID, Namespace: row.Namespace, Name: row.Name}, nil
+	return NSRef{Owner: row.OwnerUserID, Name: row.Name}, nil
 }
 
 // FindRepo walks up from dir to locate the repo a workspace belongs to. It

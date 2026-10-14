@@ -16,11 +16,11 @@ func TestOpenDriverSQLiteDialect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cs.Close() }()
-	r, err := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	r, err := cs.Create(NSRef{Name: "nr"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.String() != "n/r" {
+	if r.String() != "nr" {
 		t.Fatalf("repo: %s", r.String())
 	}
 }

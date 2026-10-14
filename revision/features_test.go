@@ -19,7 +19,7 @@ func newTestRepo(t *testing.T) (*store.Repo, *store.CentralStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := cs.Create(store.RepoRef{Namespace: "test", Name: "r"})
+	repo, err := cs.Create(store.NSRef{Name: "test" + "/" + "r"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,8 +245,8 @@ func TestCentralObjectsDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cs.Close() }()
-	r1, _ := cs.Create(store.RepoRef{Namespace: "a", Name: "r1"})
-	r2, _ := cs.Create(store.RepoRef{Namespace: "a", Name: "r2"})
+	r1, _ := cs.Create(store.NSRef{Name: "a" + "/" + "r1"})
+	r2, _ := cs.Create(store.NSRef{Name: "a" + "/" + "r2"})
 
 	blob := &object.Object{Kind: object.KindBlob, Blob: []byte("shared content")}
 	if err := r1.WriteObject(blob); err != nil {

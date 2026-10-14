@@ -22,9 +22,9 @@ func (r *Repo) PutRemote(name, url, token string) error {
 	if err != nil {
 		return err
 	}
-	row := &remoteRow{RepoID: r.repoID, Name: name, URL: url, Token: nullable(enc)}
+	row := &remoteRow{NamespaceID: r.namespaceID, Name: name, URL: url, Token: nullable(enc)}
 	return r.cs.d.gdb.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "repo_id"}, {Name: "name"}},
+		Columns:   []clause.Column{{Name: "namespace_id"}, {Name: "name"}},
 		UpdateAll: true,
 	}).Create(row).Error
 }
@@ -33,13 +33,13 @@ func (r *Repo) PutRemote(name, url, token string) error {
 // branch (the local revision id that mirrors the remote's tip after a pull).
 // Empty clears it. This enables incremental/conflict-aware pulls.
 func (r *Repo) UpdateRemoteSyncTip(name, lastSyncTip string) error {
-	return r.cs.d.gdb.Model(&remoteRow{}).Where("repo_id=? AND name=?", r.repoID, name).Update("last_sync_tip", lastSyncTip).Error
+	return r.cs.d.gdb.Model(&remoteRow{}).Where("namespace_id=? AND name=?", r.namespaceID, name).Update("last_sync_tip", lastSyncTip).Error
 }
 
 // GetLastSyncTip returns the last synced tip for a remote ("" if none).
 func (r *Repo) GetLastSyncTip(name string) (string, error) {
 	var row remoteRow
-	err := r.cs.d.gdb.Where("repo_id=? AND name=?", r.repoID, name).First(&row).Error
+	err := r.cs.d.gdb.Where("namespace_id=? AND name=?", r.namespaceID, name).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil
 	}
@@ -60,9 +60,9 @@ type RemoteRef struct {
 
 // SetRemoteRef upserts a remote ref. Primary key is remote+kind+name.
 func (r *Repo) SetRemoteRef(remoteName string, ref *RemoteRef) error {
-	row := &remoteRefRow{RepoID: r.repoID, RemoteName: remoteName, Kind: string(ref.Kind), Name: ref.Name, Target: ref.Target}
+	row := &remoteRefRow{NamespaceID: r.namespaceID, RemoteName: remoteName, Kind: string(ref.Kind), Name: ref.Name, Target: ref.Target}
 	return r.cs.d.gdb.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "repo_id"}, {Name: "remote_name"}, {Name: "kind"}, {Name: "name"}},
+		Columns:   []clause.Column{{Name: "namespace_id"}, {Name: "remote_name"}, {Name: "kind"}, {Name: "name"}},
 		UpdateAll: true,
 	}).Create(row).Error
 }
@@ -70,7 +70,7 @@ func (r *Repo) SetRemoteRef(remoteName string, ref *RemoteRef) error {
 // ListRemoteRefs lists all remote refs for this repo (optionally filtered by
 // remote name). Returns refs keyed under the remote (name is bare, e.g. "main").
 func (r *Repo) ListRemoteRefs(remoteName string) ([]*RemoteRef, error) {
-	q := r.cs.d.gdb.Where("repo_id=?", r.repoID)
+	q := r.cs.d.gdb.Where("namespace_id=?", r.namespaceID)
 	if remoteName != "" {
 		q = q.Where("remote_name=?", remoteName)
 	}
@@ -88,18 +88,18 @@ func (r *Repo) ListRemoteRefs(remoteName string) ([]*RemoteRef, error) {
 // DeleteRemoteRefsForRemote clears all recorded refs for a remote (used when a
 // remote is deleted or force-refreshed).
 func (r *Repo) DeleteRemoteRefsForRemote(remoteName string) error {
-	return r.cs.d.gdb.Where("repo_id=? AND remote_name=?", r.repoID, remoteName).Delete(&remoteRefRow{}).Error
+	return r.cs.d.gdb.Where("namespace_id=? AND remote_name=?", r.namespaceID, remoteName).Delete(&remoteRefRow{}).Error
 }
 
 // SetRemoteDefaultBranch records which branch on a remote is its default.
 func (r *Repo) SetRemoteDefaultBranch(name, def string) error {
-	return r.cs.d.gdb.Model(&remoteRow{}).Where("repo_id=? AND name=?", r.repoID, name).Update("default_branch", def).Error
+	return r.cs.d.gdb.Model(&remoteRow{}).Where("namespace_id=? AND name=?", r.namespaceID, name).Update("default_branch", def).Error
 }
 
 // GetRemoteDefaultBranch returns the remote's default branch ("" if none).
 func (r *Repo) GetRemoteDefaultBranch(name string) (string, error) {
 	var row remoteRow
-	err := r.cs.d.gdb.Where("repo_id=? AND name=?", r.repoID, name).First(&row).Error
+	err := r.cs.d.gdb.Where("namespace_id=? AND name=?", r.namespaceID, name).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil
 	}
@@ -112,7 +112,7 @@ func (r *Repo) GetRemoteDefaultBranch(name string) (string, error) {
 // GetRemote returns a remote by name.
 func (r *Repo) GetRemote(name string) (*Remote, error) {
 	var row remoteRow
-	err := r.cs.d.gdb.Where("repo_id=? AND name=?", r.repoID, name).First(&row).Error
+	err := r.cs.d.gdb.Where("namespace_id=? AND name=?", r.namespaceID, name).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}
@@ -132,14 +132,14 @@ func (r *Repo) GetRemote(name string) (*Remote, error) {
 
 // DeleteRemote removes a remote by name.
 func (r *Repo) DeleteRemote(name string) error {
-	return r.cs.d.gdb.Where("repo_id=? AND name=?", r.repoID, name).Delete(&remoteRow{}).Error
+	return r.cs.d.gdb.Where("namespace_id=? AND name=?", r.namespaceID, name).Delete(&remoteRow{}).Error
 }
 
 // ListRemotes lists all remotes for this repository. Tokens are omitted from
 // the returned list to avoid leaking secrets.
 func (r *Repo) ListRemotes() ([]*Remote, error) {
 	var rows []remoteRow
-	if err := r.cs.d.gdb.Where("repo_id=?", r.repoID).Order("name").Find(&rows).Error; err != nil {
+	if err := r.cs.d.gdb.Where("namespace_id=?", r.namespaceID).Order("name").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*Remote, 0, len(rows))

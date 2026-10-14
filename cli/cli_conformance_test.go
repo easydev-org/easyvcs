@@ -81,7 +81,7 @@ func TestCLIFetchPullPushLocal(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", srcHome)
 	csA, _ := store.OpenDefault()
 	_ = csA.SetWAL()
-	srcRepo, _ := csA.Create(store.RepoRef{Namespace: "team", Name: "app"})
+	srcRepo, _ := csA.Create(store.NSRef{Name: "team" + "/" + "app"})
 	wsA := revision.NewWorkspace(srcRepo)
 	snapA, revA, err := wsA.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{{Path: "a.txt", Content: []byte("a\n")}}, "cA", store.Author{Name: "t"}, "")
 	if err != nil {
@@ -90,7 +90,7 @@ func TestCLIFetchPullPushLocal(t *testing.T) {
 	_ = snapA
 	_, _ = wsA.SetRef("main", store.RefBranch, revA.ID)
 	srcDir := t.TempDir()
-	_ = store.WriteMarker(srcDir, &store.WorkspaceMarker{Repo: srcRepo.RepoRef(), Home: srcHome})
+	_ = store.WriteMarker(srcDir, &store.WorkspaceMarker{Repo: srcRepo.NSRef(), Home: srcHome})
 
 	// Client store.
 	dstHome := t.TempDir()
@@ -134,7 +134,7 @@ func TestCLIFetchPullPushLocal(t *testing.T) {
 	captureStdout(t, func() { cmdPush(c) })
 
 	// Remote should now have the pushed revision.
-	srcRepo2, _ := csA.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	srcRepo2, _ := csA.OpenRepo(store.NSRef{Name: "team" + "/" + "app"})
 	if _, err := srcRepo2.GetRevision(newRev.ID); err != nil {
 		t.Fatalf("remote missing pushed revision %s: %v", newRev.ID, err)
 	}

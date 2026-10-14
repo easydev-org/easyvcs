@@ -21,7 +21,7 @@ func buildRepo(tb testing.TB, n int) (*store.Repo, *store.CentralStore) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	repo, err := cs.Create(store.RepoRef{Namespace: "bench", Name: "repo"})
+	repo, err := cs.Create(store.NSRef{Name: "bench" + "/" + "repo"})
 	if err != nil {
 		tb.Fatal(err)
 	}

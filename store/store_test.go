@@ -39,15 +39,15 @@ func TestHomeDirOverride(t *testing.T) {
 
 func TestCreateOpenDeleteList(t *testing.T) {
 	cs := newTestCentral(t)
-	ref := RepoRef{Namespace: "team", Name: "app"}
+	ref := NSRef{Name: "team"}
 	repo, err := cs.Create(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repo.String() != "team/app" {
+	if repo.String() != "team" {
 		t.Fatalf("repo string: %s", repo.String())
 	}
-	if repo.RepoID() <= 0 {
+	if repo.NamespaceID() <= 0 {
 		t.Fatal("repo id should be positive")
 	}
 	// Duplicate create fails.
@@ -60,7 +60,7 @@ func TestCreateOpenDeleteList(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Round-trips return the canonical repo ref (owner 0 = unowned dev repo).
-	if got.RepoRef() != ref {
+	if got.NSRef() != ref {
 		t.Fatal("repo ref mismatch")
 	}
 	// Exists.
@@ -68,7 +68,7 @@ func TestCreateOpenDeleteList(t *testing.T) {
 		t.Fatalf("exists: %v %v", ok, err)
 	}
 	// Open missing.
-	if _, err := cs.OpenRepo(RepoRef{Namespace: "x", Name: "y"}); err == nil {
+	if _, err := cs.OpenRepo(NSRef{Name: "x-y"}); err == nil {
 		t.Fatal("expected ErrRepoNotFound")
 	}
 	// List.
@@ -87,7 +87,7 @@ func TestCreateOpenDeleteList(t *testing.T) {
 
 func TestObjectRoundTripDedup(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	blob := &object.Object{Kind: object.KindBlob, Blob: []byte("hello")}
 	if err := repo.WriteObject(blob); err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestObjectRoundTripDedup(t *testing.T) {
 
 func TestWriteObjectsBatch(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	objs := []*object.Object{
 		{Kind: object.KindBlob, Blob: []byte("a")},
 		{Kind: object.KindBlob, Blob: []byte("b")},
@@ -136,7 +136,7 @@ func TestWriteObjectsBatch(t *testing.T) {
 
 func TestSnapshotRevisionCRUD(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	snap := &Snapshot{
 		RevisionHash: object.BlobID([]byte("h")),
 		RevisionID:   "rev1",
@@ -195,7 +195,7 @@ func TestSnapshotRevisionCRUD(t *testing.T) {
 
 func TestRefsCRUD(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	if err := repo.PutRef(&Ref{Name: "main", Kind: RefBranch, Target: "r1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestRefsCRUD(t *testing.T) {
 
 func TestRemotesCRUD(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	if err := repo.PutRemote("origin", "http://x", "tok123"); err != nil {
 		t.Fatal(err)
 	}
@@ -259,15 +259,15 @@ func TestRemotesCRUD(t *testing.T) {
 
 func TestWorkspacesCRUD(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
-	if err := cs.PutWorkspace(&WorkspaceRow{Path: "/home/x", Repo: repo.RepoRef(), CurrentRevision: "r1", Branch: "main"}); err != nil {
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
+	if err := cs.PutWorkspace(&WorkspaceRow{Path: "/home/x", Repo: repo.NSRef(), CurrentRevision: "r1", Branch: "main"}); err != nil {
 		t.Fatal(err)
 	}
 	row, err := cs.GetWorkspaceByPath("/home/x")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.CurrentRevision != "r1" || row.Branch != "main" || row.Repo != repo.RepoRef() {
+	if row.CurrentRevision != "r1" || row.Branch != "main" || row.Repo != repo.NSRef() {
 		t.Fatalf("workspace mismatch: %+v", row)
 	}
 	ws, _ := cs.ListWorkspaces()
@@ -281,7 +281,7 @@ func TestWorkspacesCRUD(t *testing.T) {
 
 func TestTxWrites(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	tx := repo.BeginTx()
 	if err := repo.WriteObjectsBatchTx(tx, []*object.Object{{Kind: object.KindBlob, Blob: []byte("tx")}}); err != nil {
 		t.Fatal(err)
@@ -324,10 +324,10 @@ func TestDBPathOverride(t *testing.T) {
 	}
 }
 
-func TestRepoRefString(t *testing.T) {
-	r := RepoRef{Namespace: "a", Name: "b"}
-	if r.String() != "a/b" {
-		t.Fatal("bad RepoRef.String")
+func TestNSRefString(t *testing.T) {
+	r := NSRef{Name: "a"}
+	if r.String() != "a" {
+		t.Fatal("bad NSRef.String")
 	}
 }
 

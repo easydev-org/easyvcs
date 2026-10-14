@@ -37,7 +37,7 @@ func TestPushMirrorCRUD(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
 
-	rec := pmReq(t, s, http.MethodPost, "/api/v1/repos/team/app/push-mirrors", map[string]any{
+	rec := pmReq(t, s, http.MethodPost, "/api/v1/namespaces/team/app/push-mirrors", map[string]any{
 		"name": "dest", "url": "https://example.invalid/org/repo.git", "branch": "main", "token": "s3cr3t",
 	})
 	if rec.Code != http.StatusOK {
@@ -47,7 +47,7 @@ func TestPushMirrorCRUD(t *testing.T) {
 		t.Fatalf("create response leaked the token: %s", rec.Body.String())
 	}
 
-	rec = pmReq(t, s, http.MethodGet, "/api/v1/repos/team/app/push-mirrors", nil)
+	rec = pmReq(t, s, http.MethodGet, "/api/v1/namespaces/team/app/push-mirrors", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
@@ -65,11 +65,11 @@ func TestPushMirrorCRUD(t *testing.T) {
 		t.Fatalf("list = %+v, want one mirror named dest", listed.Mirrors)
 	}
 
-	rec = pmReq(t, s, http.MethodDelete, "/api/v1/repos/team/app/push-mirrors/dest", nil)
+	rec = pmReq(t, s, http.MethodDelete, "/api/v1/namespaces/team/app/push-mirrors/dest", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = pmReq(t, s, http.MethodGet, "/api/v1/repos/team/app/push-mirrors", nil)
+	rec = pmReq(t, s, http.MethodGet, "/api/v1/namespaces/team/app/push-mirrors", nil)
 	var after struct {
 		Mirrors []any `json:"push_mirrors"`
 	}
@@ -89,7 +89,7 @@ func TestPushMirrorSyncToBare(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
 	// seedRepo sets main to rev1 (a.txt only). Grab a repo handle to push.
-	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, err := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,14 +97,14 @@ func TestPushMirrorSyncToBare(t *testing.T) {
 	dest := t.TempDir()
 	runGit(t, "", "init", "--bare", "--quiet", dest)
 
-	rec := pmReq(t, s, http.MethodPost, "/api/v1/repos/team/app/push-mirrors", map[string]any{
+	rec := pmReq(t, s, http.MethodPost, "/api/v1/namespaces/team/app/push-mirrors", map[string]any{
 		"name": "dest", "url": "file://" + dest, "branch": "main",
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = pmReq(t, s, http.MethodPost, "/api/v1/repos/team/app/push-mirrors/dest/sync", nil)
+	rec = pmReq(t, s, http.MethodPost, "/api/v1/namespaces/team/app/push-mirrors/dest/sync", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sync: %d %s", rec.Code, rec.Body.String())
 	}
@@ -119,13 +119,13 @@ func TestPushMirrorSyncToBare(t *testing.T) {
 	}
 
 	// A bad destination records last_error and does not break the server.
-	rec = pmReq(t, s, http.MethodPost, "/api/v1/repos/team/app/push-mirrors", map[string]any{
+	rec = pmReq(t, s, http.MethodPost, "/api/v1/namespaces/team/app/push-mirrors", map[string]any{
 		"name": "bad", "url": "file:///nonexistent/does/not/exist.git", "branch": "main",
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create bad: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = pmReq(t, s, http.MethodPost, "/api/v1/repos/team/app/push-mirrors/bad/sync", nil)
+	rec = pmReq(t, s, http.MethodPost, "/api/v1/namespaces/team/app/push-mirrors/bad/sync", nil)
 	if rec.Code == http.StatusOK {
 		t.Fatalf("sync of a bad destination should fail, got 200")
 	}
@@ -155,20 +155,20 @@ func TestPushMirrorAuth(t *testing.T) {
 		s.Router().ServeHTTP(rec, req)
 		return rec.Code
 	}
-	if c := do("intruder-token", http.MethodPost, "/api/v1/repos/team/app/push-mirrors"); c != http.StatusForbidden {
+	if c := do("intruder-token", http.MethodPost, "/api/v1/namespaces/team/app/push-mirrors"); c != http.StatusForbidden {
 		t.Fatalf("non-owner create = %d, want 403", c)
 	}
-	if c := do("intruder-token", http.MethodDelete, "/api/v1/repos/team/app/push-mirrors/x"); c != http.StatusForbidden {
+	if c := do("intruder-token", http.MethodDelete, "/api/v1/namespaces/team/app/push-mirrors/x"); c != http.StatusForbidden {
 		t.Fatalf("non-owner delete = %d, want 403", c)
 	}
-	if c := do("intruder-token", http.MethodPost, "/api/v1/repos/team/app/push-mirrors/x/sync"); c != http.StatusForbidden {
+	if c := do("intruder-token", http.MethodPost, "/api/v1/namespaces/team/app/push-mirrors/x/sync"); c != http.StatusForbidden {
 		t.Fatalf("non-owner sync = %d, want 403", c)
 	}
 	// Anonymous read on a private repo => 401/403.
 	if err := repoSetPrivate(t, s, "team", "app"); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/repos/team/app/push-mirrors", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/app/push-mirrors", nil)
 	rec := httptest.NewRecorder()
 	s.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
@@ -185,7 +185,7 @@ func TestSyncAllPushMirrors(t *testing.T) {
 	seedRepo(t, s)
 	dest := t.TempDir()
 	runGit(t, "", "init", "--bare", "--quiet", dest)
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	if err := repo.PutPushMirror(&store.PushMirror{Name: "sched", URL: "file://" + dest, Branch: "main"}); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func runGitOut(t *testing.T, dir string, args ...string) string {
 
 func repoSetPrivate(t *testing.T, s *Server, ns, name string) error {
 	t.Helper()
-	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: name})
+	repo, err := s.cs.OpenRepo(store.NSRef{Name: ns + "/" + name})
 	if err != nil {
 		return err
 	}

@@ -27,7 +27,7 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 	// repos. Without it the historical behaviour (accessible = public + own)
 	// is preserved for backward compatibility.
 	var (
-		infos []store.RepoInfo
+		infos []store.NSInfo
 		err   error
 	)
 	if r.URL.Query().Get("owned") == "true" {
@@ -53,7 +53,7 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 		// Carry default_branch + private inline so a client (e.g.
 		// agent-gateway) does not have to GET each repo individually.
 		out = append(out, map[string]any{
-			"org": info.Namespace, "repo": info.Name,
+			"namespace":      info.Name,
 			"default_branch": info.DefaultBranch,
 			"private":        info.Visibility == "private",
 		})
@@ -107,11 +107,16 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, errors.New("organization is owned by another user"))
 		return
 	}
-	if err := s.cs.EnsureNamespace(u.ID, req.Org); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+	// Already owned by the caller -> idempotent OK.
+	if owner, err := s.cs.OwnerOfNamespace(req.Org); err == nil && owner == u.ID {
+		writeJSON(w, http.StatusOK, map[string]any{"namespace": req.Org})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"org": req.Org})
+	if _, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: req.Org}); err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"namespace": req.Org})
 }
 
 func (s *Server) handleGetRepo(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +146,7 @@ func (s *Server) handleGetRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"org": repo.Namespace, "repo": repo.Name,
+		"namespace":   repo.Name,
 		"description": meta.Description, "visibility": meta.Visibility,
 		"default_branch": meta.DefaultBranch, "kind": meta.Kind, "empty": len(refs) == 0,
 	})
@@ -157,7 +162,7 @@ func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: a token is required"))
 		return
 	}
-	ns, name := r.PathValue("ns"), r.PathValue("name")
+	ns := nsRefName(r)
 	req, err := decodeJSONBody[struct {
 		Description   string `json:"description"`
 		Visibility    string `json:"visibility"`
@@ -176,7 +181,7 @@ func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, errors.New("organization is owned by another user"))
 		return
 	}
-	repo, err := s.cs.Create(store.RepoRef{Owner: u.ID, Namespace: ns, Name: name})
+	repo, err := s.cs.Create(store.NSRef{Owner: u.ID, Name: ns})
 	if err != nil {
 		writeErr(w, http.StatusConflict, err)
 		return
@@ -234,7 +239,13 @@ func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"org": ns, "repo": name, "ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"namespace": ns, "ok": true})
+}
+
+// handleCreateRepo2 creates a slash-named container ("{ns}/{name}").
+func (s *Server) handleCreateRepo2(w http.ResponseWriter, r *http.Request) {
+	// Reuse handleCreateRepo but with the joined name available via PathValue.
+	s.handleCreateRepo(w, r)
 }
 
 func (s *Server) handlePatchRepo(w http.ResponseWriter, r *http.Request) {
@@ -274,16 +285,16 @@ func (s *Server) handlePatchRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"org": repo.Namespace, "repo": repo.Name,
+		"namespace":   repo.Name,
 		"description": meta.Description, "visibility": meta.Visibility, "default_branch": meta.DefaultBranch,
 	})
 }
 
 func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
-	ns, name := r.PathValue("ns"), r.PathValue("name")
-	if err := s.cs.Delete(store.RepoRef{Namespace: ns, Name: name}); err != nil {
+	ns := nsRefName(r)
+	if err := s.cs.Delete(store.NSRef{Name: ns}); err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "org": ns, "repo": name})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "namespace": ns})
 }

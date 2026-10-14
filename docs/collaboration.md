@@ -36,7 +36,7 @@ rr_comments(rr_id, author_id, body, path, created)
 ```
 
 评审与评论存于 **`rr_reviews` / `rr_comments`**（外键 `rr_id`，与 `revision_requests.id`
-对应）。它们**只追加、不覆盖**；`GET /api/v1/repos/{ns}/{name}/rr/{iid}` 会连同详情一起
+对应）。它们**只追加、不覆盖**；`GET /api/v1/namespaces/{ns}/rr/{iid}` 会连同详情一起
 返回 `reviews` / `comments`（列表端点不带，避免 N+1）。
 
 ## 3. source 只有一种：pinned snapshot
@@ -47,7 +47,7 @@ source 形态（kind）、没有 source revision 身份、没有 fork：
 - **从本地目录提**：CLI 把目录 `BuildTreeFromFS` 成 tree，`Commit` 成一个快照，
   先把该快照的 bundle 上传（`/rr/objects`，propose 级），然后建 RR。
 - **从某个 branch/revision 提**：客户端**自己**先解析出该 branch 的 tip 快照
-  （`GET /api/v1/repos/{ns}/{name}/branches` 已返回 tip 的 snapshot sha），再按
+  （`GET /api/v1/namespaces/{ns}/branches` 已返回 tip 的 snapshot sha），再按
   上面的快照路径提。服务端只认快照。
 
 因为快照不可变，**评审对象按构造永不漂**；不存在「source 侧漂移」。
@@ -121,16 +121,16 @@ gateway（`coding-workspace/workspace-gateway`）在 Forgejo + git 上模拟
 ## 9. 端点
 
 ```
-POST /api/v1/repos/{ns}/{name}/rr                 创建（source_snapshot）
-POST /api/v1/repos/{ns}/{name}/rr/objects         上传源快照对象（bundle，不含 refs）
-GET  /api/v1/repos/{ns}/{name}/rr?state=open      列表
-GET  /api/v1/repos/{ns}/{name}/rr/{iid}           详情
-GET  /api/v1/repos/{ns}/{name}/rr/{iid}/diff      基于 pinned shas 的 diff
-POST /api/v1/repos/{ns}/{name}/rr/{iid}/update    显式重新钉
-POST /api/v1/repos/{ns}/{name}/rr/{iid}/review    approve / request_changes / comment
-POST /api/v1/repos/{ns}/{name}/rr/{iid}/comment
-POST /api/v1/repos/{ns}/{name}/rr/{iid}/resolve
-POST /api/v1/repos/{ns}/{name}/rr/{iid}/merge
+POST /api/v1/namespaces/{ns}/rr                 创建（source_snapshot）
+POST /api/v1/namespaces/{ns}/rr/objects         上传源快照对象（bundle，不含 refs）
+GET  /api/v1/namespaces/{ns}/rr?state=open      列表
+GET  /api/v1/namespaces/{ns}/rr/{iid}           详情
+GET  /api/v1/namespaces/{ns}/rr/{iid}/diff      基于 pinned shas 的 diff
+POST /api/v1/namespaces/{ns}/rr/{iid}/update    显式重新钉
+POST /api/v1/namespaces/{ns}/rr/{iid}/review    approve / request_changes / comment
+POST /api/v1/namespaces/{ns}/rr/{iid}/comment
+POST /api/v1/namespaces/{ns}/rr/{iid}/resolve
+POST /api/v1/namespaces/{ns}/rr/{iid}/merge
 ```
 
 ## 10. CLI

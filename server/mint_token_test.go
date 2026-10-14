@@ -50,7 +50,7 @@ func TestMintUserTokenForExistingUser(t *testing.T) {
 
 	// BOTH tokens authenticate (the old one is NOT revoked).
 	for name, tok := range map[string]string{"tok1": tok1, "tok2": tok2} {
-		if rec := hreq(mux, http.MethodGet, "/api/v1/orgs", tok, nil); rec.Code != http.StatusOK {
+		if rec := hreq(mux, http.MethodGet, "/api/v1/namespaces", tok, nil); rec.Code != http.StatusOK {
 			t.Fatalf("%s no longer authenticates: %d %s", name, rec.Code, rec.Body.String())
 		}
 	}
@@ -68,7 +68,7 @@ func TestMintUserTokenForExistingUser(t *testing.T) {
 	if mb2["level"] != "read" {
 		t.Fatalf("level = %v, want read", mb2["level"])
 	}
-	if rec := hreq(mux, http.MethodGet, "/api/v1/orgs", tok3, nil); rec.Code != http.StatusOK {
+	if rec := hreq(mux, http.MethodGet, "/api/v1/namespaces", tok3, nil); rec.Code != http.StatusOK {
 		t.Fatalf("read token does not authenticate: %d", rec.Code)
 	}
 }

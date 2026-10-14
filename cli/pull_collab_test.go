@@ -16,7 +16,7 @@ import (
 )
 
 // stubRemoteServer fakes the easylab smart-protocol endpoints used by
-// collaborativePull: POST /api/v1/repos/{ns}/{name}/advertise and /fetch. The advertised
+// collaborativePull: POST /api/v1/namespaces/{ns}/{name}/advertise and /fetch. The advertised
 // branchs/refs and the returned bundle come from a supplied remote store.
 func stubRemoteServer(t *testing.T, remoteRepo *store.Repo) *httptest.Server {
 	t.Helper()
@@ -39,11 +39,11 @@ func stubRemoteServer(t *testing.T, remoteRepo *store.Repo) *httptest.Server {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/repos/demo/source/advertise", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/v1/namespaces/demo/source/advertise", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(advertiseResp{Repo: "demo/source", Changes: ids, Refs: refs})
 	})
-	mux.HandleFunc("POST /api/v1/repos/demo/source/fetch", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/v1/namespaces/demo/source/fetch", func(w http.ResponseWriter, r *http.Request) {
 		enc, err := transfer.CompressBundle(bundle)
 		if err != nil {
 			t.Fatalf("compress: %v", err)
@@ -120,11 +120,11 @@ func TestCollaborativePullMergesRemoteFirstTime(t *testing.T) {
 
 	fetchReq := advertiseReq{Have: localRevIDs(localRepo), HaveObjects: ownObjectIDs(localRepo)}
 	// Register the remote so last_sync_tip can be persisted.
-	if err := localRepo.PutRemote("origin", srv.URL+"/api/v1/repos/demo/source", ""); err != nil {
+	if err := localRepo.PutRemote("origin", srv.URL+"/api/v1/namespaces/demo/source", ""); err != nil {
 		t.Fatal(err)
 	}
-	rem := &store.Remote{Name: "origin", URL: srv.URL + "/api/v1/repos/demo/source"}
-	full := srv.URL + "/api/v1/repos/demo/source"
+	rem := &store.Remote{Name: "origin", URL: srv.URL + "/api/v1/namespaces/demo/source"}
+	full := srv.URL + "/api/v1/namespaces/demo/source"
 
 	// Run collaborativePull: fetch + rebase remote tip onto local main tip.
 	_, _ = adv, rid
@@ -170,7 +170,7 @@ func createRepoIn(t *testing.T, ns, name string) *store.Repo {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := cs.Create(store.RepoRef{Namespace: ns, Name: name})
+	repo, err := cs.Create(store.NSRef{Name: ns + "/" + name})
 	if err != nil {
 		t.Fatal(err)
 	}

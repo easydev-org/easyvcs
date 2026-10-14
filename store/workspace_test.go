@@ -13,7 +13,7 @@ func TestMarkers(t *testing.T) {
 	if _, _, err := LoadMarker(dir); err == nil {
 		t.Fatal("expected ErrNotFound when no marker")
 	}
-	m := &WorkspaceMarker{Repo: RepoRef{Namespace: "n", Name: "r"}, CurrentRevision: "rev1", Branch: "main"}
+	m := &WorkspaceMarker{Repo: NSRef{Name: "n-r"}, CurrentRevision: "rev1", Branch: "main"}
 	if err := WriteMarker(dir, m); err != nil {
 		t.Fatal(err)
 	}
@@ -38,21 +38,21 @@ func TestMarkers(t *testing.T) {
 
 func TestWorkspaceResolve(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	dir := t.TempDir()
-	if err := WriteMarker(dir, &WorkspaceMarker{Repo: repo.RepoRef(), CurrentRevision: "r1"}); err != nil {
+	if err := WriteMarker(dir, &WorkspaceMarker{Repo: repo.NSRef(), CurrentRevision: "r1"}); err != nil {
 		t.Fatal(err)
 	}
 	marker, gotRepo, err := cs.ResolveWorkspace(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotRepo.RepoRef() != repo.RepoRef() || marker.CurrentRevision != "r1" {
+	if gotRepo.NSRef() != repo.NSRef() || marker.CurrentRevision != "r1" {
 		t.Fatalf("resolve mismatch: %+v %+v", marker, gotRepo)
 	}
 	// Missing repo
 	dir2 := t.TempDir()
-	if err := WriteMarker(dir2, &WorkspaceMarker{Repo: RepoRef{Namespace: "no", Name: "repo"}}); err != nil {
+	if err := WriteMarker(dir2, &WorkspaceMarker{Repo: NSRef{Name: "no-repo"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := cs.ResolveWorkspace(dir2); err == nil {
@@ -64,7 +64,7 @@ func TestWriteMarkerRecordsHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("EASYVCS_HOME", home)
 	dir := t.TempDir()
-	m := &WorkspaceMarker{Repo: RepoRef{Namespace: "n", Name: "r"}}
+	m := &WorkspaceMarker{Repo: NSRef{Name: "n-r"}}
 	if err := WriteMarker(dir, m); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestWriteMarkerRecordsHome(t *testing.T) {
 
 func TestOpenStoreForMarkerRequiresLocation(t *testing.T) {
 	// A marker with no Home/DSN must be rejected (no silent fallback).
-	if _, err := OpenStoreForMarker(&WorkspaceMarker{Repo: RepoRef{Namespace: "n", Name: "r"}}); err == nil {
+	if _, err := OpenStoreForMarker(&WorkspaceMarker{Repo: NSRef{Name: "n-r"}}); err == nil {
 		t.Fatal("expected error for marker without store location")
 	}
 	if _, err := OpenStoreForMarker(nil); err == nil {
@@ -94,7 +94,7 @@ func TestOpenStoreForMarkerRequiresLocation(t *testing.T) {
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := OpenStoreForMarker(&WorkspaceMarker{Repo: RepoRef{Namespace: "n", Name: "r"}, Home: home})
+	cs, err := OpenStoreForMarker(&WorkspaceMarker{Repo: NSRef{Name: "n-r"}, Home: home})
 	if err != nil {
 		t.Fatalf("expected open with home: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestOpenStoreForMarkerPrecedence(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", other)
 	// DSN wins over Home.
 	dsn := filepath.Join(home, "custom.db")
-	cs, err := OpenStoreForMarker(&WorkspaceMarker{Repo: RepoRef{Namespace: "n", Name: "r"}, Home: home, DSN: dsn})
+	cs, err := OpenStoreForMarker(&WorkspaceMarker{Repo: NSRef{Name: "n-r"}, Home: home, DSN: dsn})
 	if err != nil {
 		t.Fatalf("open with dsn: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestOpenStoreForMarkerPrecedence(t *testing.T) {
 
 func TestRepoCloseAndObjectIDs(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(NSRef{Name: "n-r"})
 	_ = repo.WriteObject(&object.Object{Kind: object.KindBlob, Blob: []byte("a")})
 	ids, err := repo.ObjectIDs()
 	if err != nil {

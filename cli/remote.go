@@ -451,12 +451,11 @@ func clientHaveSet(repo *store.Repo, adv advertiseResp) []string {
 	return out
 }
 
-
 // baseForRepo joins a remote base URL with the repo's namespace/name path used
 // by the smart protocol endpoints (/api/v1/repos/{ns}/{name}/...).
-func baseForRepo(base string, repoRef store.RepoRef) string {
+func baseForRepo(base string, repoRef store.NSRef) string {
 	base = trimTrailingSlash(base)
-	return base + "/api/v1/repos/" + repoRef.Namespace + "/" + repoRef.Name
+	return base + "/api/v1/namespaces/" + repoRef.Name
 }
 
 // cmdFetch fetches remote branchs (all, or those named in args) and records
@@ -496,7 +495,7 @@ func doFetch(repo *store.Repo, args []string) error {
 		return recordFetchedRefs(repo, rem.Name, refs, rem.URL, only)
 	}
 
-	full := baseForRepo(rem.URL, repo.RepoRef())
+	full := baseForRepo(rem.URL, repo.NSRef())
 
 	var adv advertiseResp
 	if err := postJSON(full+"/advertise", advertiseReq{Have: currentRevisionIDs(repo)}, &adv, rem.Token); err != nil {
@@ -573,7 +572,7 @@ func cmdPull(c *ctx) {
 		return
 	}
 
-	full := baseForRepo(rem.URL, repo.RepoRef())
+	full := baseForRepo(rem.URL, repo.NSRef())
 
 	var adv advertiseResp
 	if err := postJSON(full+"/advertise", advertiseReq{Have: currentRevisionIDs(repo)}, &adv, rem.Token); err != nil {
@@ -634,7 +633,7 @@ func doPull(repo *store.Repo, args []string) error {
 		return doLocalPull(&ctx{}, repo, rem, want, rem.URL)
 	}
 
-	full := baseForRepo(rem.URL, repo.RepoRef())
+	full := baseForRepo(rem.URL, repo.NSRef())
 
 	var adv advertiseResp
 	if err := postJSON(full+"/advertise", advertiseReq{Have: currentRevisionIDs(repo)}, &adv, rem.Token); err != nil {
@@ -845,7 +844,7 @@ func cmdPush(c *ctx) {
 // computes the delta the server still needs, and sends it. It is separated from
 // cmdPush so a test can drive it directly against an httptest server.
 func doPushHTTP(repo *store.Repo, rem *store.Remote) error {
-	full := baseForRepo(rem.URL, repo.RepoRef())
+	full := baseForRepo(rem.URL, repo.NSRef())
 
 	// Incremental push: advertise what the server currently holds (refs +
 	// revisions + objects), then send only a delta the server is missing.

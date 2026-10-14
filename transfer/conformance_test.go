@@ -34,7 +34,7 @@ func TestConformanceCollectObjectsWhere(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", home)
 	cs, _ := store.OpenDefault()
 	defer func() { _ = cs.Close() }()
-	repo, _ := cs.Create(store.RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(store.NSRef{Name: "n" + "/" + "r"})
 	rootID := seedTreeRepo(t, repo)
 
 	// hasObject knows the a.txt blob => it should NOT be re-sent (but sub/root
@@ -65,7 +65,7 @@ func TestCollectWithHaveSkipsKnownRevisions(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", home)
 	cs, _ := store.OpenDefault()
 	defer func() { _ = cs.Close() }()
-	repo, _ := cs.Create(store.RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(store.NSRef{Name: "n" + "/" + "r"})
 	treeID := seedTreeRepo(t, repo)
 	s := &store.Snapshot{RevisionID: "revA", TreeID: treeID, Author: store.Author{Name: "t"}}
 	s.RevisionHash = store.SnapshotHashFor(s)
@@ -94,7 +94,7 @@ func TestFilterBundleByWant(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", home)
 	cs, _ := store.OpenDefault()
 	defer func() { _ = cs.Close() }()
-	repo, _ := cs.Create(store.RepoRef{Namespace: "n", Name: "r"})
+	repo, _ := cs.Create(store.NSRef{Name: "n" + "/" + "r"})
 	treeID := seedTreeRepo(t, repo)
 	s := &store.Snapshot{RevisionID: "revA", TreeID: treeID, Author: store.Author{Name: "t"}}
 	s.RevisionHash = store.SnapshotHashFor(s)
@@ -117,7 +117,7 @@ func TestFilterBundleByWant(t *testing.T) {
 // preserve the bundle (revisions + refs + objects) — including the new
 // ExpectedRefs and that the wire frame is not broken.
 func TestBundleBinaryRoundTrip(t *testing.T) {
-	b := &Bundle{Version: Version, Repo: store.RepoRef{Namespace: "n", Name: "r"},
+	b := &Bundle{Version: Version, Repo: store.NSRef{Name: "n" + "/" + "r"},
 		Revisions:    []*store.Revision{{ID: "revA", Hash: object.BlobID([]byte("h"))}},
 		Refs:         []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: "revA"}},
 		Objects:      []ObjectRecord{{Kind: object.KindBlob, Content: []byte("data")}},

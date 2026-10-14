@@ -55,27 +55,24 @@ func SnapshotHashFor(s *Snapshot) object.ID {
 	return object.BlobID([]byte(b.String()))
 }
 
-// RepoRef uniquely identifies a repository within the central store. Owner
-// scopes the (namespace, name) pair: a user owns repositories only under the
-// namespaces they own, so two users may each own an "acme/api" repo. Owner 0
-// means "unspecified" and is only used by internal lookups that resolve the
-// owner from the row.
-type RepoRef struct {
-	Owner     int64
-	Namespace string
-	Name      string
+// NSRef identifies a NAMESPACE — the SINGLE container (there is no separate
+// repository entity; a "repository" is a PATH within a namespace, see
+// docs/namespace-container.md). Owner scopes the name: a user owns namespaces
+// under their own account. Owner 0 means "unspecified" for internal lookups
+// that resolve the owner from the row.
+type NSRef struct {
+	Owner int64
+	Name  string
 }
 
-// RepoInfo is a RepoRef plus the repo's hosting metadata. The list endpoints
-// return this so a client does not have to GET each repo individually (these
-// fields already live on the same row the list query loads).
-type RepoInfo struct {
-	RepoRef
+// NSInfo is an NSRef plus the namespace's hosting metadata.
+type NSInfo struct {
+	NSRef
 	Visibility    string
 	DefaultBranch string
 }
 
-func (r RepoRef) String() string { return r.Namespace + "/" + r.Name }
+func (r NSRef) String() string { return r.Name }
 
 // Author is a named identity. Session is an optional extra dimension (e.g. a
 // workspace session name "org:repo:branch") used to attribute a change to the
@@ -212,10 +209,12 @@ type RepoStore interface {
 // Repo is a repo-scoped handle bound to a specific repository in the central
 // store. It implements RepoStore. OwnerUserID is the namespace owner (the
 // repository's owner).
+// Repo is a handle to a NAMESPACE container (the name is kept for source
+// compatibility; semantically it is the namespace). path scopes are applied
+// ABOVE it (refs/revisions filtered by path).
 type Repo struct {
 	cs          *CentralStore
-	repoID      int64
+	namespaceID int64
 	OwnerUserID int64
-	Namespace   string
 	Name        string
 }

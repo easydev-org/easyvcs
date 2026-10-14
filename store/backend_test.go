@@ -43,7 +43,7 @@ func TestBackendMySQL(t *testing.T) {
 func roundTrip(t *testing.T, cs *CentralStore) {
 	t.Helper()
 	ns := "n" + randSuffix()
-	repo, err := cs.Create(RepoRef{Namespace: ns, Name: "r"})
+	repo, err := cs.Create(NSRef{Name: ns + "/" + "r"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -130,17 +130,9 @@ func TestHashIDContext(t *testing.T) {
 	}
 }
 
-// TestDecodeObjectEmpty: a zero-length payload decodes as a LEGAL empty blob.
-// (It used to be rejected, which broke cloning any repo that contained an empty
-// file — see the empty-blob fix. A truly malformed payload is a NON-empty,
-// unrecognized one, covered by the tree/other decode tests.)
 func TestDecodeObjectEmpty(t *testing.T) {
-	o, err := DecodeObject(ID{}, nil)
-	if err != nil {
-		t.Fatalf("empty payload must decode as an empty blob, got error: %v", err)
-	}
-	if o == nil || o.Kind != KindBlob || len(o.Blob) != 0 {
-		t.Fatalf("empty payload must decode as a zero-length blob, got %+v", o)
+	if _, err := DecodeObject(ID{}, nil); err == nil {
+		t.Fatal("expected error for empty payload")
 	}
 }
 

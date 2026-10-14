@@ -21,7 +21,7 @@ func TestChangedPathDirs(t *testing.T) {
 // something under a directory are returned (and the lazy backfill works).
 func TestRevisionsTouching(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, err := cs.Create(RepoRef{Namespace: "idx", Name: "r"})
+	repo, err := cs.Create(NSRef{Name: "idx-r"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,8 @@ func isGitHTTPPath(path string) bool {
 func (s *Server) gitHandler(w http.ResponseWriter, r *http.Request) {
 	// Path is /api/v1/repos/{ns}/{name}/<rest>; {name} may carry a ".git" suffix
 	// and <rest> ends with "/info/refs" or "/git-upload-pack".
-	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/")
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/namespaces/")
+	// {ns}/{name} name the container; any deeper segments are the scope path.
 	parts := strings.SplitN(trimmed, "/", 3)
 	if len(parts) < 3 {
 		http.NotFound(w, r)
@@ -40,7 +41,7 @@ func (s *Server) gitHandler(w http.ResponseWriter, r *http.Request) {
 	// to clone this subdir as its own module.
 	if r.URL.Query().Get("go-get") == "1" {
 		host := r.Host
-		path := "/api/v1/repos/" + parts[0] + "/" + strings.TrimSuffix(parts[1], ".git") + "/" + strings.Trim(rest, "/")
+		path := "/api/v1/namespaces/" + parts[0] + "/" + parts[1] + "/" + strings.Trim(rest, "/")
 		path = strings.TrimSuffix(path, ".git")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta name="go-import" content="%s%s git http://%s%s"></head><body>easyvcs</body></html>`,

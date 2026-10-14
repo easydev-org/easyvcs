@@ -28,7 +28,7 @@ func TestGitClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cs.Close() }()
-	repo, _ := cs.Create(store.RepoRef{Namespace: "acme", Name: "lib"})
+	repo, _ := cs.Create(store.NSRef{Name: "acme" + "/" + "lib"})
 	ws := revision.NewWorkspace(repo)
 	_, r1, err := ws.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{{Path: "go.mod", Content: []byte("module acme/lib\n")}}, "init", store.Author{Name: "t", Email: "t@x"}, "")
 	if err != nil {
@@ -85,7 +85,7 @@ func TestGitCloneSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cs.Close() }()
-	repo, _ := cs.Create(store.RepoRef{Namespace: "acme", Name: "mono"})
+	repo, _ := cs.Create(store.NSRef{Name: "acme" + "/" + "mono"})
 	ws := revision.NewWorkspace(repo)
 	// commit 1: only top-level (no pkg-a yet)
 	_, r1, _ := ws.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{{Path: "README.md", Content: []byte("mono\n")}}, "init", store.Author{Name: "t"}, "")
@@ -142,7 +142,7 @@ func TestSubdirRefScopeNoLeak(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cs.Close() }()
-	repo, _ := cs.Create(store.RepoRef{Namespace: "acme", Name: "mono"})
+	repo, _ := cs.Create(store.NSRef{Name: "acme" + "/" + "mono"})
 	ws := revision.NewWorkspace(repo)
 	_, rev, _ := ws.CommitFromChanges(object.ID{},
 		[]revision.FileChangeSpec{

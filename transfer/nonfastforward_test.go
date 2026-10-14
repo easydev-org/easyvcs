@@ -19,7 +19,7 @@ func TestIsAncestorAndCheckNonFastForward(t *testing.T) {
 	}
 	_ = cs.SetWAL()
 	defer func() { _ = cs.Close() }()
-	repo, err := cs.Create(store.RepoRef{Namespace: "n", Name: "r"})
+	repo, err := cs.Create(store.NSRef{Name: "n" + "/" + "r"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestHashForRevisionAmbiguousPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cs.Close() })
-	repo, err := cs.Create(store.RepoRef{Namespace: "n", Name: "r"})
+	repo, err := cs.Create(store.NSRef{Name: "n" + "/" + "r"})
 	if err != nil {
 		t.Fatal(err)
 	}

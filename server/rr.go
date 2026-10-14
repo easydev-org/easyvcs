@@ -18,7 +18,7 @@ import (
 // canPropose reports whether the caller may open/update a request. Writing a
 // request always requires a credential; developer+ (or an open instance for dev
 // ergonomics) may propose.
-func (s *Server) canPropose(rref store.RepoRef, tk *store.Token) bool {
+func (s *Server) canPropose(rref store.NSRef, tk *store.Token) bool {
 	if tk == nil {
 		return false
 	}
@@ -30,7 +30,7 @@ func (s *Server) canPropose(rref store.RepoRef, tk *store.Token) bool {
 }
 
 // canMerge reports whether the caller may merge a request (owner/maintainer).
-func (s *Server) canMerge(rref store.RepoRef, tk *store.Token) bool {
+func (s *Server) canMerge(rref store.NSRef, tk *store.Token) bool {
 	role, err := s.cs.RoleOfRef(rref, userIDVal(tk))
 	if err == nil && role.CanMerge() {
 		return true
@@ -69,7 +69,7 @@ func (s *Server) requirePropose(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: propose requires a token"))
 			return
 		}
-		rref := store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
+		rref := store.NSRef{Name: nsRefName(r)}
 		if !s.canPropose(rref, tk) {
 			s.auditDenied(r, tk, "no propose access")
 			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no propose access to %s", rref))
@@ -89,7 +89,7 @@ func (s *Server) requireMerge(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: missing or invalid token"))
 			return
 		}
-		rref := store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
+		rref := store.NSRef{Name: nsRefName(r)}
 		if !s.canMerge(rref, tk) {
 			s.auditDenied(r, tk, "no merge access")
 			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no merge access to %s", rref))
@@ -101,17 +101,17 @@ func (s *Server) requireMerge(next http.HandlerFunc) http.HandlerFunc {
 
 // mountRR registers the Revision Request routes on mux.
 func (s *Server) mountRR(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/rr", s.requirePropose(s.handleRRCreate))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/rr/objects", s.requirePropose(s.handleRRObjects))
-	mux.HandleFunc("GET /api/v1/repos/{ns}/{name}/rr", s.requireRepoAccess(false, s.handleRRList))
-	mux.HandleFunc("GET /api/v1/repos/{ns}/{name}/rr/{iid}", s.requireRepoAccess(false, s.handleRRGet))
-	mux.HandleFunc("GET /api/v1/repos/{ns}/{name}/rr/{iid}/diff", s.requireRepoAccess(false, s.handleRRDiff))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/rr/{iid}/update", s.requirePropose(s.handleRRUpdate))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/rr/{iid}/review", s.requirePropose(s.handleRRReview))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/rr/{iid}/comment", s.requirePropose(s.handleRRComment))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/rr/{iid}/resolve", s.requirePropose(s.handleRRResolve))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/rr/{iid}/merge", s.requireMerge(s.handleRRMerge))
-	mux.HandleFunc("POST /api/v1/repos/{ns}/{name}/rr/{iid}/close", s.requireMerge(s.handleRRClose))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr", s.requirePropose(s.handleRRCreate))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/objects", s.requirePropose(s.handleRRObjects))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/rr", s.requireRepoAccess(false, s.handleRRList))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/rr/{iid}", s.requireRepoAccess(false, s.handleRRGet))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/{name}/rr/{iid}/diff", s.requireRepoAccess(false, s.handleRRDiff))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/update", s.requirePropose(s.handleRRUpdate))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/review", s.requirePropose(s.handleRRReview))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/comment", s.requirePropose(s.handleRRComment))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/resolve", s.requirePropose(s.handleRRResolve))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/merge", s.requireMerge(s.handleRRMerge))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/{name}/rr/{iid}/close", s.requireMerge(s.handleRRClose))
 }
 
 // rrService opens the RR service for the request's repo.
@@ -211,7 +211,7 @@ func (s *Server) handleRRList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	list, err := s.cs.ListRevisionRequests(repo.RepoID(), r.URL.Query().Get("state"))
+	list, err := s.cs.ListRevisionRequests(repo.NamespaceID(), r.URL.Query().Get("state"))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -232,7 +232,7 @@ func (s *Server) handleRRGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	x, err := s.cs.GetRevisionRequest(repo.RepoID(), iid)
+	x, err := s.cs.GetRevisionRequest(repo.NamespaceID(), iid)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
@@ -264,7 +264,7 @@ func (s *Server) handleRRDiff(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	x, err := s.cs.GetRevisionRequest(repo.RepoID(), iid)
+	x, err := s.cs.GetRevisionRequest(repo.NamespaceID(), iid)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
@@ -307,7 +307,7 @@ func (s *Server) handleRRUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid source_snapshot: %w", herr))
 		return
 	}
-	x, err := s.cs.GetRevisionRequest(repo.RepoID(), iid)
+	x, err := s.cs.GetRevisionRequest(repo.NamespaceID(), iid)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
@@ -336,7 +336,7 @@ func (s *Server) handleRRReview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	x, err := s.cs.GetRevisionRequest(repo.RepoID(), iid)
+	x, err := s.cs.GetRevisionRequest(repo.NamespaceID(), iid)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
@@ -373,7 +373,7 @@ func (s *Server) handleRRComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	x, err := s.cs.GetRevisionRequest(repo.RepoID(), iid)
+	x, err := s.cs.GetRevisionRequest(repo.NamespaceID(), iid)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
@@ -407,7 +407,7 @@ func (s *Server) handleRRResolve(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	x, err := s.cs.GetRevisionRequest(repo.RepoID(), iid)
+	x, err := s.cs.GetRevisionRequest(repo.NamespaceID(), iid)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
@@ -434,7 +434,7 @@ func (s *Server) handleRRMerge(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	x, err := s.cs.GetRevisionRequest(repo.RepoID(), iid)
+	x, err := s.cs.GetRevisionRequest(repo.NamespaceID(), iid)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
@@ -484,7 +484,7 @@ func (s *Server) handleRRClose(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	x, err := s.cs.GetRevisionRequest(repo.RepoID(), iid)
+	x, err := s.cs.GetRevisionRequest(repo.NamespaceID(), iid)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return

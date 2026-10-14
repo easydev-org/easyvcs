@@ -14,7 +14,7 @@ import (
 // ref plus all of its changes, snapshots, refs, and the referenced objects.
 type bundle struct {
 	Version   int               `json:"version"`
-	Repo      store.RepoRef     `json:"repo"`
+	Repo      store.NSRef       `json:"repo"`
 	Revisions []*store.Revision `json:"changes"`
 	Snapshots []*store.Snapshot `json:"snapshots"`
 	Refs      []*store.Ref      `json:"refs"`
@@ -48,7 +48,7 @@ func cmdExport(c *ctx) {
 	if err != nil {
 		c.fatal("export:", err)
 	}
-	repo, err := c.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: name})
+	repo, err := c.cs.OpenRepo(store.NSRef{Name: ns + "/" + name})
 	if err != nil {
 		c.fatal("export:", err)
 	}
@@ -104,7 +104,7 @@ func cmdExport(c *ctx) {
 		}
 	}
 
-	b := bundle{Version: 1, Repo: repo.RepoRef(), Revisions: changes, Snapshots: snaps, Refs: refs, Objects: objs}
+	b := bundle{Version: 1, Repo: repo.NSRef(), Revisions: changes, Snapshots: snaps, Refs: refs, Objects: objs}
 	f, err := os.Create(out)
 	if err != nil {
 		c.fatal("export:", err)
@@ -150,7 +150,7 @@ func cmdImport(c *ctx) {
 
 	repoRef := b.Repo
 	if nsOverride != "" {
-		repoRef.Namespace = nsOverride
+		repoRef = store.NSRef{Name: nsOverride + "/" + bottomOf(repoRef.Name)}
 	}
 
 	// Create (or reuse) the repository.

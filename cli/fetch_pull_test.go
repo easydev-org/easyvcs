@@ -131,15 +131,15 @@ func stubRemoteServer2(t *testing.T, remoteRepo *store.Repo) *httptest.Server {
 
 // newRemoteMux builds an httptest server that answers advertise+fetch using a
 // pre-built bundle. It mirrors the easyvcs smart-protocol path
-// /api/v1/repos/{ns}/{name}/…
+// /api/v1/namespaces/{ns}/{name}/…
 func newRemoteMux(t *testing.T, refs []*store.Ref, ids []string, b *transfer.Bundle, repo string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/repos/"+repo+"/advertise", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/v1/namespaces/"+repo+"/advertise", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(advertiseResp{Repo: repo, Changes: ids, Refs: refs})
 	})
-	mux.HandleFunc("POST /api/v1/repos/"+repo+"/fetch", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/v1/namespaces/"+repo+"/fetch", func(w http.ResponseWriter, r *http.Request) {
 		enc, err := transfer.CompressBundle(b)
 		if err != nil {
 			t.Fatalf("compress: %v", err)

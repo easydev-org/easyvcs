@@ -25,7 +25,7 @@ type repoLocker interface {
 	// lock acquires the repository lock, returning a function that releases it.
 	// It blocks until the lock is held (or the acquisition deadline passes) and
 	// returns an error only on an infrastructure failure.
-	lock(ctx context.Context, repoID int64) (func(), error)
+	lock(ctx context.Context, namespaceID int64) (func(), error)
 }
 
 // newRepoLocker picks the implementation for the store's backend. Postgres gets
@@ -44,8 +44,8 @@ type localRepoLocker struct {
 	locks sync.Map // int64 (repo id) -> *sync.Mutex
 }
 
-func (l *localRepoLocker) lock(_ context.Context, repoID int64) (func(), error) {
-	v, _ := l.locks.LoadOrStore(repoID, &sync.Mutex{})
+func (l *localRepoLocker) lock(_ context.Context, namespaceID int64) (func(), error) {
+	v, _ := l.locks.LoadOrStore(namespaceID, &sync.Mutex{})
 	mu := v.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock, nil
@@ -63,14 +63,14 @@ type pgRepoLocker struct {
 // Postgres when its connection drops, so the wait is finite.
 const repoLockAcquireTimeout = 5 * time.Minute
 
-func (l *pgRepoLocker) lock(ctx context.Context, repoID int64) (func(), error) {
+func (l *pgRepoLocker) lock(ctx context.Context, namespaceID int64) (func(), error) {
 	ctx, cancel := context.WithTimeout(ctx, repoLockAcquireTimeout)
 	defer cancel()
 	conn, err := l.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("repo lock: acquire conn: %w", err)
 	}
-	key := repoLockKey(repoID)
+	key := repoLockKey(namespaceID)
 	for {
 		var got bool
 		if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&got); err != nil {
@@ -83,7 +83,7 @@ func (l *pgRepoLocker) lock(ctx context.Context, repoID int64) (func(), error) {
 		select {
 		case <-ctx.Done():
 			_ = conn.Close()
-			return nil, fmt.Errorf("repo lock: timed out waiting for repo %d: %w", repoID, ctx.Err())
+			return nil, fmt.Errorf("repo lock: timed out waiting for repo %d: %w", namespaceID, ctx.Err())
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
@@ -98,4 +98,4 @@ func (l *pgRepoLocker) lock(ctx context.Context, repoID int64) (func(), error) {
 // repoLockKey derives the 64-bit advisory-lock key for a repository. Repo ids
 // are positive, so they never collide with the scheduler's leader key (the
 // most-negative int64; see mirrorLeaderKey).
-func repoLockKey(repoID int64) int64 { return repoID }
+func repoLockKey(namespaceID int64) int64 { return namespaceID }

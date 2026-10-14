@@ -106,7 +106,7 @@ func cmdRequestCreate(c *ctx, args []string) {
 	}
 	// The local repo must match the target ns/name so the pushed bundle lands
 	// in the right repository.
-	if repo.Namespace != ns || repo.Name != name {
+	if repo.Name != ns+"/"+name {
 		c.fatalf("request create: local workspace is %s, but --into is %s/%s (attach or clone the target first)", repo, ns, name)
 	}
 	ws := revision.NewWorkspace(repo)
@@ -178,11 +178,11 @@ func pushRequestBundle(repo *store.Repo, remoteName string, srcSnapshot, baseSna
 	if err != nil {
 		return fmt.Errorf("remote %q not found: %w", remoteName, err)
 	}
-	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.RepoRef()}
+	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef()}
 	if err := appendSnapshotBundle(repo, b, srcSnapshot); err != nil {
 		return err
 	}
-	full := strings.TrimRight(rem.URL, "/") + "/api/v1/repos/" + repo.Namespace + "/" + repo.Name
+	full := strings.TrimRight(rem.URL, "/") + "/api/v1/namespaces/" + repo.Name
 	return postBundleOnly(full+"/rr/objects", b, rem.Token)
 }
 
@@ -231,7 +231,7 @@ func requestPost(repo *store.Repo, remoteName, path string, body any) (string, e
 	if err != nil {
 		return "", fmt.Errorf("remote %q not found: %w", remoteName, err)
 	}
-	full := strings.TrimRight(rem.URL, "/") + "/api/v1/repos/" + repo.Namespace + "/" + repo.Name + path
+	full := strings.TrimRight(rem.URL, "/") + "/api/v1/namespaces/" + repo.Name + path
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return "", err
@@ -249,7 +249,7 @@ func requestGet(repo *store.Repo, remoteName, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("remote %q not found: %w", remoteName, err)
 	}
-	full := strings.TrimRight(rem.URL, "/") + "/api/v1/repos/" + repo.Namespace + "/" + repo.Name + path
+	full := strings.TrimRight(rem.URL, "/") + "/api/v1/namespaces/" + repo.Name + path
 	req, err := http.NewRequest(http.MethodGet, full, nil)
 	if err != nil {
 		return "", err

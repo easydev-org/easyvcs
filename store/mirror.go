@@ -11,14 +11,14 @@ import (
 // PushMirror is a named external git destination that receives a force push of
 // a single branch's tree. A normal (read-write) repository may have several.
 type PushMirror struct {
-	ID        int64
-	RepoID    int64
-	Name      string
-	URL       string
-	Branch    string // branch name to push (default "main")
-	Token     string
-	LastRev   string // last revision id pushed (dirty detection)
-	LastError string
+	ID          int64
+	NamespaceID int64
+	Name        string
+	URL         string
+	Branch      string // branch name to push (default "main")
+	Token       string
+	LastRev     string // last revision id pushed (dirty detection)
+	LastError   string
 }
 
 // PutPushMirror inserts or replaces a push-mirror for this repo. The token is
@@ -28,9 +28,9 @@ func (r *Repo) PutPushMirror(m *PushMirror) error {
 	if err != nil {
 		return err
 	}
-	row := &pushMirrorRow{RepoID: r.repoID, Name: m.Name, URL: m.URL, Branch: m.Branch, Token: enc, LastRev: m.LastRev, LastError: m.LastError}
+	row := &pushMirrorRow{NamespaceID: r.namespaceID, Name: m.Name, URL: m.URL, Branch: m.Branch, Token: enc, LastRev: m.LastRev, LastError: m.LastError}
 	return r.cs.d.gdb.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "repo_id"}, {Name: "name"}},
+		Columns:   []clause.Column{{Name: "namespace_id"}, {Name: "name"}},
 		UpdateAll: true,
 	}).Create(row).Error
 }
@@ -38,7 +38,7 @@ func (r *Repo) PutPushMirror(m *PushMirror) error {
 // GetPushMirror returns one push-mirror by name (token decrypted).
 func (r *Repo) GetPushMirror(name string) (*PushMirror, error) {
 	var row pushMirrorRow
-	err := r.cs.d.gdb.Where("repo_id=? AND name=?", r.repoID, name).First(&row).Error
+	err := r.cs.d.gdb.Where("namespace_id=? AND name=?", r.namespaceID, name).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}
@@ -49,19 +49,19 @@ func (r *Repo) GetPushMirror(name string) (*PushMirror, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &PushMirror{ID: row.ID, RepoID: row.RepoID, Name: row.Name, URL: row.URL,
+	return &PushMirror{ID: row.ID, NamespaceID: row.NamespaceID, Name: row.Name, URL: row.URL,
 		Branch: row.Branch, Token: dec, LastRev: row.LastRev, LastError: row.LastError}, nil
 }
 
 // ListPushMirrors lists all push-mirrors for this repo (tokens omitted).
 func (r *Repo) ListPushMirrors() ([]*PushMirror, error) {
 	var rows []pushMirrorRow
-	if err := r.cs.d.gdb.Where("repo_id=?", r.repoID).Order("name").Find(&rows).Error; err != nil {
+	if err := r.cs.d.gdb.Where("namespace_id=?", r.namespaceID).Order("name").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*PushMirror, 0, len(rows))
 	for i := range rows {
-		out = append(out, &PushMirror{ID: rows[i].ID, RepoID: rows[i].RepoID, Name: rows[i].Name, URL: rows[i].URL,
+		out = append(out, &PushMirror{ID: rows[i].ID, NamespaceID: rows[i].NamespaceID, Name: rows[i].Name, URL: rows[i].URL,
 			Branch: rows[i].Branch, LastRev: rows[i].LastRev, LastError: rows[i].LastError})
 	}
 	return out, nil
@@ -69,7 +69,7 @@ func (r *Repo) ListPushMirrors() ([]*PushMirror, error) {
 
 // DeletePushMirror removes a push-mirror by name.
 func (r *Repo) DeletePushMirror(name string) error {
-	res := r.cs.d.gdb.Where("repo_id=? AND name=?", r.repoID, name).Delete(&pushMirrorRow{})
+	res := r.cs.d.gdb.Where("namespace_id=? AND name=?", r.namespaceID, name).Delete(&pushMirrorRow{})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -81,13 +81,13 @@ func (r *Repo) DeletePushMirror(name string) error {
 
 // UpdatePushMirrorSync records the last pushed revision / error for a push-mirror.
 func (r *Repo) UpdatePushMirrorSync(name, lastRev, lastErr string) error {
-	return r.cs.d.gdb.Model(&pushMirrorRow{}).Where("repo_id=? AND name=?", r.repoID, name).Updates(map[string]any{
+	return r.cs.d.gdb.Model(&pushMirrorRow{}).Where("namespace_id=? AND name=?", r.namespaceID, name).Updates(map[string]any{
 		"last_rev": lastRev, "last_error": lastErr,
 	}).Error
 }
 
 // CreateMirror creates a read-only mirror repository and returns its handle.
-func (s *CentralStore) CreateMirror(r RepoRef, meta RepoMeta) (*Repo, error) {
+func (s *CentralStore) CreateMirror(r NSRef, meta RepoMeta) (*Repo, error) {
 	if meta.Kind == "" {
 		meta.Kind = "mirror"
 	}
@@ -112,12 +112,12 @@ func (s *CentralStore) CreateMirror(r RepoRef, meta RepoMeta) (*Repo, error) {
 
 // AllPushMirrors lists every push-mirror across all repositories (scheduler).
 // Tokens are decrypted for the scheduler's authenticated pushes. Each returned
-// mirror keeps its OWN Name (the mirror name) and RepoID; the caller resolves
-// the repository via RepoRefByID(RepoID) — no compound label is built, so there
+// mirror keeps its OWN Name (the mirror name) and NamespaceID; the caller resolves
+// the repository via NSRefByID(NamespaceID) — no compound label is built, so there
 // is no name to split back apart.
 func (s *CentralStore) AllPushMirrors() ([]*PushMirror, error) {
 	var rows []pushMirrorRow
-	if err := s.d.gdb.Order("repo_id, name").Find(&rows).Error; err != nil {
+	if err := s.d.gdb.Order("name").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*PushMirror, 0, len(rows))
@@ -126,7 +126,7 @@ func (s *CentralStore) AllPushMirrors() ([]*PushMirror, error) {
 		if err != nil {
 			return nil, fmt.Errorf("push mirror %s: %w", rows[i].Name, err)
 		}
-		out = append(out, &PushMirror{ID: rows[i].ID, RepoID: rows[i].RepoID, Name: rows[i].Name, URL: rows[i].URL,
+		out = append(out, &PushMirror{ID: rows[i].ID, NamespaceID: rows[i].NamespaceID, Name: rows[i].Name, URL: rows[i].URL,
 			Branch: rows[i].Branch, Token: dec, LastRev: rows[i].LastRev, LastError: rows[i].LastError})
 	}
 	return out, nil
@@ -136,19 +136,19 @@ func (s *CentralStore) AllPushMirrors() ([]*PushMirror, error) {
 // token is decrypted (RepoMeta.UpdateMirrorMeta encrypts on write; this raw
 // row read must mirror that).
 func (s *CentralStore) AllMirrors() ([]*Repo, RepoMetaMap, error) {
-	var rows []repoRow
-	if err := s.d.gdb.Where("kind=?", "mirror").Order("namespace, name").Find(&rows).Error; err != nil {
+	var rows []namespaceRow
+	if err := s.d.gdb.Where("kind=?", "mirror").Order("name").Find(&rows).Error; err != nil {
 		return nil, nil, err
 	}
 	repos := make([]*Repo, 0, len(rows))
 	meta := RepoMetaMap{}
 	for i := range rows {
-		repos = append(repos, &Repo{cs: s, repoID: rows[i].ID, OwnerUserID: rows[i].OwnerUserID, Namespace: rows[i].Namespace, Name: rows[i].Name})
+		repos = append(repos, &Repo{cs: s, namespaceID: rows[i].ID, OwnerUserID: rows[i].OwnerUserID, Name: rows[i].Name})
 		dec, err := decryptSecret(rows[i].MirrorToken)
 		if err != nil {
-			return nil, nil, fmt.Errorf("mirror %s/%s: %w", rows[i].Namespace, rows[i].Name, err)
+			return nil, nil, fmt.Errorf("mirror %s: %w", rows[i].Name, err)
 		}
-		meta[nameOf(rows[i].Namespace, rows[i].Name)] = RepoMeta{
+		meta[rows[i].Name] = RepoMeta{
 			Kind: rows[i].Kind, MirrorURL: rows[i].MirrorURL, MirrorBranch: rows[i].MirrorBranch,
 			MirrorInterval: int(rows[i].MirrorInterval), MirrorLastRev: rows[i].MirrorLastRev,
 			MirrorLastSync: rows[i].MirrorLastSync, MirrorLastErr: rows[i].MirrorLastErr, MirrorToken: dec,
@@ -164,7 +164,7 @@ func nameOf(ns, name string) string { return ns + "/" + name }
 
 // TouchMirrorSync updates a mirror's last sync time/rev/error.
 func (r *Repo) TouchMirrorSync(lastRev string, syncEpoch int64, lastErr string) error {
-	return r.cs.d.gdb.Model(&repoRow{}).Where("id=?", r.repoID).Updates(map[string]any{
+	return r.cs.d.gdb.Model(&namespaceRow{}).Where("id=?", r.namespaceID).Updates(map[string]any{
 		"mirror_last_rev": lastRev, "mirror_last_sync": syncEpoch, "mirror_last_error": lastErr,
 	}).Error
 }

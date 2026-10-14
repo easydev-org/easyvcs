@@ -13,7 +13,7 @@ import (
 // identity remapping and content preservation.
 func seedForkSource(t *testing.T, cs *CentralStore) (*Repo, *object.ID, *object.ID) {
 	t.Helper()
-	repo, err := cs.Create(RepoRef{Namespace: "fork", Name: "src"})
+	repo, err := cs.Create(NSRef{Name: "fork-src"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestForkRemapsIdentities(t *testing.T) {
 	_ = cs.SetWAL()
 	src, _, _ := seedForkSource(t, cs)
 
-	dst, err := cs.Fork(src.RepoRef(), RepoRef{Namespace: "fork", Name: "dst"})
+	dst, err := cs.Fork(src.NSRef(), NSRef{Name: "fork-dst"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestForkRefsPointAtNewIDs(t *testing.T) {
 	cs := newTestCentral(t)
 	_ = cs.SetWAL()
 	src, _, _ := seedForkSource(t, cs)
-	dst, err := cs.Fork(src.RepoRef(), RepoRef{Namespace: "fork", Name: "dst"})
+	dst, err := cs.Fork(src.NSRef(), NSRef{Name: "fork-dst"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestForkSnapshotHashesDiffer(t *testing.T) {
 	src, sh1, sh2 := seedForkSource(t, cs)
 	_ = sh1
 	_ = sh2
-	dst, err := cs.Fork(src.RepoRef(), RepoRef{Namespace: "fork", Name: "dst"})
+	dst, err := cs.Fork(src.NSRef(), NSRef{Name: "fork-dst"})
 	if err != nil {
 		t.Fatal(err)
 	}

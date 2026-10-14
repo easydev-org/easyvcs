@@ -71,7 +71,7 @@ func TestLogRefScopesToReachableHistory(t *testing.T) {
 	}
 
 	// ref=main => MAIN + base, never FEATONLY.
-	gotMain := logDescs(t, hreq(mux, http.MethodGet, "/api/v1/repos/team/app/log?ref=main", token, nil))
+	gotMain := logDescs(t, hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/log?ref=main", token, nil))
 	if !hasDesc(gotMain, "MAIN") {
 		t.Fatalf("ref=main missing MAIN: %v", gotMain)
 	}
@@ -80,7 +80,7 @@ func TestLogRefScopesToReachableHistory(t *testing.T) {
 	}
 
 	// ref=feat => FEATONLY + base, never MAIN.
-	gotFeat := logDescs(t, hreq(mux, http.MethodGet, "/api/v1/repos/team/app/log?ref=feat", token, nil))
+	gotFeat := logDescs(t, hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/log?ref=feat", token, nil))
 	if !hasDesc(gotFeat, "FEATONLY") {
 		t.Fatalf("ref=feat missing FEATONLY: %v", gotFeat)
 	}
@@ -92,19 +92,19 @@ func TestLogRefScopesToReachableHistory(t *testing.T) {
 	}
 
 	// No ref => the whole repository (backward compatible).
-	gotAll := logDescs(t, hreq(mux, http.MethodGet, "/api/v1/repos/team/app/log", token, nil))
+	gotAll := logDescs(t, hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/log", token, nil))
 	if !hasDesc(gotAll, "MAIN") || !hasDesc(gotAll, "FEATONLY") {
 		t.Fatalf("ref-less log should hold every branch's commits: %v", gotAll)
 	}
 
 	// ref=<revision id> resolves too.
-	gotByID := logDescs(t, hreq(mux, http.MethodGet, "/api/v1/repos/team/app/log?ref="+feat.ID, token, nil))
+	gotByID := logDescs(t, hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/log?ref="+feat.ID, token, nil))
 	if !hasDesc(gotByID, "FEATONLY") || hasDesc(gotByID, "MAIN") {
 		t.Fatalf("ref=<feat revision id> wrong: %v", gotByID)
 	}
 
 	// Unknown ref => 404.
-	if rec := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/log?ref=nope", token, nil); rec.Code != http.StatusNotFound {
+	if rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/log?ref=nope", token, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown ref: got %d %s, want 404", rec.Code, rec.Body.String())
 	}
 }

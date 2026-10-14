@@ -33,16 +33,16 @@ func TestRepoNamespaceGlobalAndOwnerScoped(t *testing.T) {
 		t.Fatalf("create bob: %v", err)
 	}
 
-	a := RepoRef{Owner: alice.ID, Namespace: "platform", Name: "api"}
+	a := NSRef{Owner: alice.ID, Name: "platform/api"}
 	if _, err := s.Create(a); err != nil {
 		t.Fatalf("create alice/platform/api: %v", err)
 	}
 	// bob cannot take the same namespace/name (global address).
-	if _, err := s.Create(RepoRef{Owner: bob.ID, Namespace: "platform", Name: "api"}); err == nil {
+	if _, err := s.Create(NSRef{Owner: bob.ID, Name: "platform/api"}); err == nil {
 		t.Fatal("duplicate namespace/name must be rejected")
 	}
 	// Repo owner is the namespace owner.
-	got, err := s.OpenRepo(RepoRef{Namespace: "platform", Name: "api"})
+	got, err := s.OpenRepo(NSRef{Name: "platform/api"})
 	if err != nil || got.OwnerUserID != alice.ID {
 		t.Fatalf("open: %v %+v", err, got)
 	}
@@ -62,19 +62,19 @@ func TestDeleteIsOwnerScoped(t *testing.T) {
 	s := openTenantStore(t)
 	alice, _ := s.CreateUser("alice", "Alice")
 	bob, _ := s.CreateUser("bob", "Bob")
-	if _, err := s.Create(RepoRef{Owner: alice.ID, Namespace: "a", Name: "r"}); err != nil {
+	if _, err := s.Create(NSRef{Owner: alice.ID, Name: "a-r"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Create(RepoRef{Owner: bob.ID, Namespace: "b", Name: "r"}); err != nil {
+	if _, err := s.Create(NSRef{Owner: bob.ID, Name: "b-r"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Delete(RepoRef{Namespace: "a", Name: "r"}); err != nil {
+	if err := s.Delete(NSRef{Name: "a-r"}); err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := s.RepoExists(RepoRef{Namespace: "a", Name: "r"}); ok {
+	if ok, _ := s.RepoExists(NSRef{Name: "a-r"}); ok {
 		t.Fatal("a copy should be gone")
 	}
-	if ok, _ := s.RepoExists(RepoRef{Namespace: "b", Name: "r"}); !ok {
+	if ok, _ := s.RepoExists(NSRef{Name: "b-r"}); !ok {
 		t.Fatal("b copy must survive")
 	}
 }
@@ -88,40 +88,40 @@ func TestRepoMemberRoles(t *testing.T) {
 	dev, _ := s.CreateUser("dev", "Developer")
 	other, _ := s.CreateUser("other", "Other")
 
-	repo, err := s.Create(RepoRef{Owner: owner.ID, Namespace: "acme", Name: "api"})
+	repo, err := s.Create(NSRef{Owner: owner.ID, Name: "acme/api"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Owner role comes from namespace ownership.
-	if role, _ := s.RoleOf(repo.RepoID(), owner.ID); !role.CanPush() {
+	if role, _ := s.RoleOf(repo.NamespaceID(), owner.ID); !role.CanPush() {
 		t.Fatalf("owner role = %q, want owner", role)
 	}
-	if err := s.SetRepoMember(repo.RepoID(), maint.ID, RoleMaintainer, &owner.ID); err != nil {
+	if err := s.SetRepoMember(repo.NamespaceID(), maint.ID, RoleMaintainer, &owner.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRepoMember(repo.RepoID(), dev.ID, RoleDeveloper, &owner.ID); err != nil {
+	if err := s.SetRepoMember(repo.NamespaceID(), dev.ID, RoleDeveloper, &owner.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	if role, _ := s.RoleOf(repo.RepoID(), maint.ID); role.CanPush() || !role.CanMerge() {
+	if role, _ := s.RoleOf(repo.NamespaceID(), maint.ID); role.CanPush() || !role.CanMerge() {
 		t.Fatalf("maintainer role = %q (push=%v merge=%v)", role, role.CanPush(), role.CanMerge())
 	}
-	if role, _ := s.RoleOf(repo.RepoID(), dev.ID); role.CanMerge() || !role.CanPropose() {
+	if role, _ := s.RoleOf(repo.NamespaceID(), dev.ID); role.CanMerge() || !role.CanPropose() {
 		t.Fatalf("developer role = %q (merge=%v propose=%v)", role, role.CanMerge(), role.CanPropose())
 	}
 	// A private repo with no grant: no role.
 	repo.UpdateRepoMeta(RepoMeta{Visibility: "private"})
-	if role, _ := s.RoleOf(repo.RepoID(), other.ID); role != RoleNone {
+	if role, _ := s.RoleOf(repo.NamespaceID(), other.ID); role != RoleNone {
 		t.Fatalf("non-member on private repo = %q, want none", role)
 	}
 	// Public exposes developer-equivalent access.
 	repo.UpdateRepoMeta(RepoMeta{Visibility: "public"})
-	if role, _ := s.RoleOf(repo.RepoID(), other.ID); !role.CanRead() {
+	if role, _ := s.RoleOf(repo.NamespaceID(), other.ID); !role.CanRead() {
 		t.Fatalf("public repo should be readable, got %q", role)
 	}
 	// Anonymous on a public repo reads.
-	if role, _ := s.RoleOf(repo.RepoID(), 0); !role.CanRead() || role.CanPush() {
+	if role, _ := s.RoleOf(repo.NamespaceID(), 0); !role.CanRead() || role.CanPush() {
 		t.Fatalf("anonymous public role = %q", role)
 	}
 }

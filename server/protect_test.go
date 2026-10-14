@@ -22,7 +22,7 @@ func branchBundle(t *testing.T, repo *store.Repo, branch, target string) []byte 
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.RepoRef(),
+	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
 		Revisions: revs, Refs: []*store.Ref{{Name: branch, Kind: store.RefBranch, Target: target}}}
 	payload, err := transfer.CompressBundle(b)
 	if err != nil {
@@ -34,7 +34,7 @@ func branchBundle(t *testing.T, repo *store.Repo, branch, target string) []byte 
 // push posts a bundle to the repo's push endpoint and returns the status.
 func push(t *testing.T, s *Server, payload []byte) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repos/team/app/push", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team/app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
@@ -69,7 +69,7 @@ func childAndRoot(t *testing.T, repo *store.Repo) (child, root string) {
 // A new repository protects `main` by default.
 func TestProtectedBranchesDefaultMain(t *testing.T) {
 	s := newTestServer(t, "secret")
-	repo, err := s.cs.Create(store.RepoRef{Owner: 0, Namespace: "team", Name: "app"})
+	repo, err := s.cs.Create(store.NSRef{Owner: 0, Name: "team/app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestPushProtectedBranchRefused(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
 	// Re-enable protection on main (seedRepo disabled it for the push fixtures).
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	if err := repo.SetProtectedBranches([]string{"main"}); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestPushProtectedBranchRefused(t *testing.T) {
 func TestPushProtectedBranchNoOpAllowed(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	if err := repo.SetProtectedBranches([]string{"main"}); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestPushProtectedBranchNoOpAllowed(t *testing.T) {
 func TestProtectedBranchesAreConfigurable(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	repo, _ := s.cs.OpenRepo(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team/app"})
 	if err := repo.SetProtectedBranches([]string{"release/x"}); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestProtectedBranchEndpoints(t *testing.T) {
 
 	get := func() []string {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/repos/team/app/protected-branches", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/team/app/protected-branches", nil)
 		req.Header.Set("Authorization", "Bearer secret")
 		s.Router().ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -200,7 +200,7 @@ func TestProtectedBranchEndpoints(t *testing.T) {
 	put := func(list []string) {
 		body, _ := json.Marshal(map[string]any{"protected_branches": list})
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPut, "/api/v1/repos/team/app/protected-branches", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/namespaces/team/app/protected-branches", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer secret")
 		s.Router().ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {

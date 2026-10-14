@@ -35,8 +35,8 @@ webui / workspace-extension ──workspace.v1──▶ agent-gateway ──┬�
 | workspace-gateway 现在（forgejo） | → easyvcs 端点 |
 |---|---|
 | `EnsureOrg` / `CreateOrg` | `POST /api/v1/orgs` |
-| `EnsureRepo` / `CreateEmptyRepo` / `GetRepo` / `RepoExists` | `POST/GET /api/v1/repos/{ns}/{name}` |
-| `DeleteRepo` | `DELETE /api/v1/repos/{ns}/{name}` |
+| `EnsureRepo` / `CreateEmptyRepo` / `GetRepo` / `RepoExists` | `POST/GET /api/v1/namespaces/{ns}` |
+| `DeleteRepo` | `DELETE /api/v1/namespaces/{ns}` |
 | `Tree` | `GET .../tree?ref=&path=` |
 | `ReadBlob` | `GET .../blob?ref=&path=` |
 | `RawFile` / `RawContents` | `GET .../raw?ref=&path=` |

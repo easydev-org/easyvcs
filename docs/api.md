@@ -73,29 +73,29 @@ The CLI resolves the identity from `--author`/`--session` > `EASYVCS_AUTHOR_NAME
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/repos` | any | repositories the caller can access (public + own/member); each carries `default_branch` + `private` inline. `?owned=true` lists ONLY the caller own/member repos (no other tenant public repos) |
-| GET | `/api/v1/orgs` | any | namespaces the caller owns |
-| POST | `/api/v1/orgs` | token | create a namespace (owned by the caller) |
-| GET | `/api/v1/repos/{ns}/{name}` | read | metadata: description / visibility / default_branch / kind / empty. **404** when the repo does not exist; **403** only when it exists but the caller may not read it (so a client can distinguish missing from forbidden) |
-| POST | `/api/v1/repos/{ns}/{name}` | token | create a repository (owner = caller). Body `{description?, visibility?, default_branch?, init?}`. **New repos default to `private`** (multi-tenant safety; pass `visibility:"public"` to publish). `init:true` seeds an initial empty commit on `main` (server-side bootstrap, bypassing branch protection) so branches can be created from `main` |
-| PATCH | `/api/v1/repos/{ns}/{name}` | owner | update description / visibility / default_branch |
-| DELETE | `/api/v1/repos/{ns}/{name}` | owner | delete a repository |
+| GET | `/api/v1/namespaces` | any | repositories the caller can access (public + own/member); each carries `default_branch` + `private` inline. `?owned=true` lists ONLY the caller own/member repos (no other tenant public repos) |
+| GET | `/api/v1/namespaces` | any | namespaces the caller owns |
+| POST | `/api/v1/namespaces` | token | create a namespace (owned by the caller) |
+| GET | `/api/v1/namespaces/{ns}` | read | metadata: description / visibility / default_branch / kind / empty. **404** when the repo does not exist; **403** only when it exists but the caller may not read it (so a client can distinguish missing from forbidden) |
+| POST | `/api/v1/namespaces/{ns}` | token | create a repository (owner = caller). Body `{description?, visibility?, default_branch?, init?}`. **New repos default to `private`** (multi-tenant safety; pass `visibility:"public"` to publish). `init:true` seeds an initial empty commit on `main` (server-side bootstrap, bypassing branch protection) so branches can be created from `main` |
+| PATCH | `/api/v1/namespaces/{ns}` | owner | update description / visibility / default_branch |
+| DELETE | `/api/v1/namespaces/{ns}` | owner | delete a repository |
 
 ## Refs
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/repos/{ns}/{name}/refs` | read | all branch + tag refs |
-| GET | `/api/v1/repos/{ns}/{name}/branches` | read | branches (with tip sha) |
-| POST | `/api/v1/repos/{ns}/{name}/branches` | write | `{name, from}`; derives a fresh revision |
-| DELETE | `/api/v1/repos/{ns}/{name}/branches/{branch}` | write | delete a branch |
-| GET | `/api/v1/repos/{ns}/{name}/tags` | read | tags |
-| POST | `/api/v1/repos/{ns}/{name}/tags` | write | `{name, target}`; immutable (re-tag is 409) |
-| POST | `/api/v1/repos/{ns}/{name}/branches/{branch}/sync` | write | integrate `base` (default `main`) into `{branch}`; `{base?}`; returns `{ok, branch, base, clean, conflicts[], revision_id, snapshot}` (+`up_to_date`). See "Branch sync" below |
+| GET | `/api/v1/namespaces/{ns}/refs` | read | all branch + tag refs |
+| GET | `/api/v1/namespaces/{ns}/branches` | read | branches (with tip sha) |
+| POST | `/api/v1/namespaces/{ns}/branches` | write | `{name, from}`; derives a fresh revision |
+| DELETE | `/api/v1/namespaces/{ns}/branches/{branch}` | write | delete a branch |
+| GET | `/api/v1/namespaces/{ns}/tags` | read | tags |
+| POST | `/api/v1/namespaces/{ns}/tags` | write | `{name, target}`; immutable (re-tag is 409) |
+| POST | `/api/v1/namespaces/{ns}/branches/{branch}/sync` | write | integrate `base` (default `main`) into `{branch}`; `{base?}`; returns `{ok, branch, base, clean, conflicts[], revision_id, snapshot}` (+`up_to_date`). See "Branch sync" below |
 
 ## Branch sync
 
-`POST /api/v1/repos/{ns}/{name}/branches/{branch}/sync` integrates the `base`
+`POST /api/v1/namespaces/{ns}/branches/{branch}/sync` integrates the `base`
 branch (default `main`) into a feature `branch`, so the branch catches up with
 the base (git's *update branch / merge base into this branch*). Auth is
 **write** (owner); a protected branch (e.g. `main`) cannot be the TARGET.
@@ -117,14 +117,14 @@ the base (git's *update branch / merge base into this branch*). Auth is
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/repos/{ns}/{name}/tree?ref=&path=` | read | directory listing (name/kind/size/sha) |
-| GET | `/api/v1/repos/{ns}/{name}/blob?ref=&path=` | read | text inline; binary is flagged (use `/raw`) |
-| GET | `/api/v1/repos/{ns}/{name}/raw?ref=&path=` | read | raw bytes (any content type) |
-| GET | `/api/v1/repos/{ns}/{name}/log?ref=&path=&limit=` | read | commit history (or a file's history); each entry has `author` + `session`. **`ref` empty = the whole repository's revisions; `ref` set (branch/tag/revision id) = only the revisions REACHABLE from it** (the branch's own history, along first-parent + fork edges); an unknown `ref` is 404 |
-| GET | `/api/v1/repos/{ns}/{name}/commit/{sha}` | read | commit/snapshot metadata (`author` + `session`) |
-| GET | `/api/v1/repos/{ns}/{name}/diff?base=&head=` | read | per-file diff between two snapshots (`binary` flag) |
-| GET | `/api/v1/repos/{ns}/{name}/blame?ref=&path=` | read | line-level attribution (`author` + `session` per line) |
-| GET | `/api/v1/repos/{ns}/{name}/archive/{ref}.tar.gz` | read | the tree at `ref` as a gzipped tar (streamed; sandbox checkout). The ref must be explicit (`main.tar.gz`); a non-`.tar.gz` path is 400, an unknown ref is 404. Optional `?path=<dir>` archives only that **subtree**, rooted AT the directory (its entries appear at the archive root) |
+| GET | `/api/v1/namespaces/{ns}/tree?ref=&path=` | read | directory listing (name/kind/size/sha) |
+| GET | `/api/v1/namespaces/{ns}/blob?ref=&path=` | read | text inline; binary is flagged (use `/raw`) |
+| GET | `/api/v1/namespaces/{ns}/raw?ref=&path=` | read | raw bytes (any content type) |
+| GET | `/api/v1/namespaces/{ns}/log?ref=&path=&limit=` | read | commit history (or a file's history); each entry has `author` + `session`. **`ref` empty = the whole repository's revisions; `ref` set (branch/tag/revision id) = only the revisions REACHABLE from it** (the branch's own history, along first-parent + fork edges); an unknown `ref` is 404 |
+| GET | `/api/v1/namespaces/{ns}/commit/{sha}` | read | commit/snapshot metadata (`author` + `session`) |
+| GET | `/api/v1/namespaces/{ns}/diff?base=&head=` | read | per-file diff between two snapshots (`binary` flag) |
+| GET | `/api/v1/namespaces/{ns}/blame?ref=&path=` | read | line-level attribution (`author` + `session` per line) |
+| GET | `/api/v1/namespaces/{ns}/archive/{ref}.tar.gz` | read | the tree at `ref` as a gzipped tar (streamed; sandbox checkout). The ref must be explicit (`main.tar.gz`); a non-`.tar.gz` path is 400, an unknown ref is 404. Optional `?path=<dir>` archives only that **subtree**, rooted AT the directory (its entries appear at the archive root) |
 
 ## git smart HTTP (read-only)
 
@@ -136,18 +136,18 @@ easyvcs API / Revision Requests.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/repos/{ns}/{name}/info/refs?service=git-upload-pack` | read | smart-HTTP advertisement |
-| POST | `/api/v1/repos/{ns}/{name}/git-upload-pack` | read | the packfile for clone/fetch |
+| GET | `/api/v1/namespaces/{ns}/info/refs?service=git-upload-pack` | read | smart-HTTP advertisement |
+| POST | `/api/v1/namespaces/{ns}/git-upload-pack` | read | the packfile for clone/fetch |
 
 ```
-git clone http://<user>:<token>@<server>/api/v1/repos/{ns}/{name}
+git clone http://<user>:<token>@<server>/api/v1/namespaces/{ns}
 ```
 
 **Monorepo subdirectories**: append a subdir path and that subtree is served as
 its own repository (its history = the commits that touch it):
 
 ```
-git clone http://<user>:<token>@<server>/api/v1/repos/{ns}/{name}/<subdir>
+git clone http://<user>:<token>@<server>/api/v1/namespaces/{ns}/<subdir>
 ```
 
 Go module vanity also works per subdir: `GET .../{ns}/{name}/<subdir>?go-get=1`
@@ -163,7 +163,7 @@ O(revisions under the path).
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/repos/{ns}/{name}/subrepo?path=<dir>&limit=` | read | `{path, refs:[{kind,name,target,subtree}], commits:[{revision_id,sha,description,author,time,subtree}]}` |
+| GET | `/api/v1/namespaces/{ns}/subrepo?path=<dir>&limit=` | read | `{path, refs:[{kind,name,target,subtree}], commits:[{revision_id,sha,description,author,time,subtree}]}` |
 
 ## Push mirrors
 
@@ -177,14 +177,14 @@ background scheduler (see `cmd/server`) periodically re-pushes every mirror;
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/repos/{ns}/{name}/push-mirrors` | read | list mirrors (token omitted) |
-| POST | `/api/v1/repos/{ns}/{name}/push-mirrors` | owner | create/replace `{name, url, branch?, token?}`; `branch` defaults to `main` |
-| DELETE | `/api/v1/repos/{ns}/{name}/push-mirrors/{name}` | owner | delete a mirror (404 when absent) |
-| POST | `/api/v1/repos/{ns}/{name}/push-mirrors/{name}/sync` | owner | push now; on failure returns **502** `{ok:false,error}` and records `last_error` (the server stays up) |
+| GET | `/api/v1/namespaces/{ns}/push-mirrors` | read | list mirrors (token omitted) |
+| POST | `/api/v1/namespaces/{ns}/push-mirrors` | owner | create/replace `{name, url, branch?, token?}`; `branch` defaults to `main` |
+| DELETE | `/api/v1/namespaces/{ns}/push-mirrors/{name}` | owner | delete a mirror (404 when absent) |
+| POST | `/api/v1/namespaces/{ns}/push-mirrors/{name}/sync` | owner | push now; on failure returns **502** `{ok:false,error}` and records `last_error` (the server stays up) |
 
 ## Import an external git repository
 
-`POST /api/v1/repos/{ns}/{name}/import` clones an **external** git repository
+`POST /api/v1/namespaces/{ns}/import` clones an **external** git repository
 (heads only — never `refs/pull/*`) and imports its history as easyvcs revisions,
 landing the selected ref on the repository's `main`. It is the engine-native
 replacement for the workspace gateway's `repo-import` tool, and it lives in the
@@ -201,11 +201,11 @@ redacted `detail` — the token and any URL userinfo are never returned or logge
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/repos/{ns}/{name}/import` | owner | `{url, branch?, depth?, token?, ssh_key?, ssh_key_passphrase?, description?, create?}`; `branch` defaults to `main` (the source ref name is irrelevant — it lands on `main`). `depth` (default `0` = full history; `1` = tip only, i.e. a single-revision **snapshot**; `N` = last N commits) — executed by go-git, no `git` binary. Returns `{ok, org, repo, branch:"main", revisions}`. Bounded by `EASYVCS_IMPORT_TIMEOUT` (seconds; unset = 15m). |
+| POST | `/api/v1/namespaces/{ns}/import` | owner | `{url, branch?, depth?, token?, ssh_key?, ssh_key_passphrase?, description?, create?}`; `branch` defaults to `main` (the source ref name is irrelevant — it lands on `main`). `depth` (default `0` = full history; `1` = tip only, i.e. a single-revision **snapshot**; `N` = last N commits) — executed by go-git, no `git` binary. Returns `{ok, org, repo, branch:"main", revisions}`. Bounded by `EASYVCS_IMPORT_TIMEOUT` (seconds; unset = 15m). |
 
 ## Commit (working-copy-free write path)
 
-`POST /api/v1/repos/{ns}/{name}/commit` applies a set of file operations to a
+`POST /api/v1/namespaces/{ns}/commit` applies a set of file operations to a
 **non-default** branch in one revision — no server-side working copy, no staging
 area. It is the easyvcs-native replacement for a git clone/amend/force-push flow
 (and for a workspace gateway's "staging placeholder" hack): N file ops become
@@ -247,7 +247,7 @@ Body:
 
 ## Snapshot (propose without a branch)
 
-`POST /api/v1/repos/{ns}/{name}/snapshot` applies a set of file operations and
+`POST /api/v1/namespaces/{ns}/snapshot` applies a set of file operations and
 returns a new **revision + snapshot** that **no ref points at** — it moves no
 branch or tag. It is the "propose from a sandbox" primitive: the RR source is a
 **snapshot**, not a branch, so a client can upload the files it changed and hand
@@ -291,8 +291,8 @@ move a protected branch is refused (403, `error: protected-branch`); a no-op pus
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/repos/{ns}/{name}/protected-branches` | read | the protected set |
-| PUT | `/api/v1/repos/{ns}/{name}/protected-branches` | owner | `{protected_branches: [...]}`; empty clears protection |
+| GET | `/api/v1/namespaces/{ns}/protected-branches` | read | the protected set |
+| PUT | `/api/v1/namespaces/{ns}/protected-branches` | owner | `{protected_branches: [...]}`; empty clears protection |
 
 ## Revision Requests (collaboration)
 
@@ -305,17 +305,17 @@ no source revision, and no fork.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/repos/{ns}/{name}/rr` | propose | create; `{source_snapshot, target_branch, title, body}` |
-| POST | `/api/v1/repos/{ns}/{name}/rr/objects` | propose | upload the source snapshot's objects (bundle, **no refs**) |
-| GET | `/api/v1/repos/{ns}/{name}/rr?state=` | read | list requests |
-| GET | `/api/v1/repos/{ns}/{name}/rr/{iid}` | read | one request; includes `reviews` + `comments` |
-| GET | `/api/v1/repos/{ns}/{name}/rr/{iid}/diff` | read | pinned diff (never drifts) |
-| POST | `/api/v1/repos/{ns}/{name}/rr/{iid}/update` | propose | explicit re-pin (`{source_snapshot}`) |
-| POST | `/api/v1/repos/{ns}/{name}/rr/{iid}/review` | propose | `{state: approved\|request_changes\|comment, body}` |
-| POST | `/api/v1/repos/{ns}/{name}/rr/{iid}/comment` | propose | `{body, path?}` |
-| POST | `/api/v1/repos/{ns}/{name}/rr/{iid}/resolve` | propose | `{path, side}` for a conflicted merge |
-| POST | `/api/v1/repos/{ns}/{name}/rr/{iid}/merge` | merge | always commits a new single-parent revision on the target |
-| POST | `/api/v1/repos/{ns}/{name}/rr/{iid}/close` | merge | close without merging (idempotent; a merged RR is refused) |
+| POST | `/api/v1/namespaces/{ns}/rr` | propose | create; `{source_snapshot, target_branch, title, body}` |
+| POST | `/api/v1/namespaces/{ns}/rr/objects` | propose | upload the source snapshot's objects (bundle, **no refs**) |
+| GET | `/api/v1/namespaces/{ns}/rr?state=` | read | list requests |
+| GET | `/api/v1/namespaces/{ns}/rr/{iid}` | read | one request; includes `reviews` + `comments` |
+| GET | `/api/v1/namespaces/{ns}/rr/{iid}/diff` | read | pinned diff (never drifts) |
+| POST | `/api/v1/namespaces/{ns}/rr/{iid}/update` | propose | explicit re-pin (`{source_snapshot}`) |
+| POST | `/api/v1/namespaces/{ns}/rr/{iid}/review` | propose | `{state: approved\|request_changes\|comment, body}` |
+| POST | `/api/v1/namespaces/{ns}/rr/{iid}/comment` | propose | `{body, path?}` |
+| POST | `/api/v1/namespaces/{ns}/rr/{iid}/resolve` | propose | `{path, side}` for a conflicted merge |
+| POST | `/api/v1/namespaces/{ns}/rr/{iid}/merge` | merge | always commits a new single-parent revision on the target |
+| POST | `/api/v1/namespaces/{ns}/rr/{iid}/close` | merge | close without merging (idempotent; a merged RR is refused) |
 
 ## Smart protocol (sync)
 
@@ -324,9 +324,9 @@ Used by the CLI (`fetch`/`pull`/`push`). Bodies are binary bundles
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/repos/{ns}/{name}/advertise` | read | list revisions + refs (+ per-revision snapshot hashes) |
-| POST | `/api/v1/repos/{ns}/{name}/fetch` | read | incremental bundle |
-| POST | `/api/v1/repos/{ns}/{name}/push` | write | non-fast-forward is rejected (409); atomic apply |
+| POST | `/api/v1/namespaces/{ns}/advertise` | read | list revisions + refs (+ per-revision snapshot hashes) |
+| POST | `/api/v1/namespaces/{ns}/fetch` | read | incremental bundle |
+| POST | `/api/v1/namespaces/{ns}/push` | write | non-fast-forward is rejected (409); atomic apply |
 
 ---
 

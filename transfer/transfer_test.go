@@ -19,7 +19,7 @@ func seedTransferRepo(t testing.TB) (*store.Repo, *store.CentralStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := cs.Create(store.RepoRef{Namespace: "n", Name: "r"})
+	repo, err := cs.Create(store.NSRef{Name: "n" + "/" + "r"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestCollectApplyRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = csB.Close() }()
-	repoB, _ := csB.Create(store.RepoRef{Namespace: "n", Name: "rB"})
+	repoB, _ := csB.Create(store.NSRef{Name: "n" + "/" + "rB"})
 	n, err := Apply(repoB, b)
 	if err != nil {
 		t.Fatal(err)

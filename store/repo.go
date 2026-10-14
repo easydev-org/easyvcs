@@ -1,16 +1,16 @@
 package store
 
-// RepoID returns the numeric repo id used internally.
-func (r *Repo) RepoID() int64 { return r.repoID }
+// NamespaceID returns the numeric repo id used internally.
+func (r *Repo) NamespaceID() int64 { return r.namespaceID }
 
-func (r *Repo) String() string { return r.Namespace + "/" + r.Name }
+func (r *Repo) String() string { return r.Name }
 
 // Close is a no-op for the repo handle (the CentralStore is shared).
 func (r *Repo) Close() error { return nil }
 
-// RepoRef returns the RepoRef for this handle.
-func (r *Repo) RepoRef() RepoRef {
-	return RepoRef{Owner: r.OwnerUserID, Namespace: r.Namespace, Name: r.Name}
+// NSRef returns the NSRef for this handle.
+func (r *Repo) NSRef() NSRef {
+	return NSRef{Owner: r.OwnerUserID, Name: r.Name}
 }
 
 // Owner returns the repository's owner user id (the namespace owner).

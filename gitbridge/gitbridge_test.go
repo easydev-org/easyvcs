@@ -41,7 +41,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 	defer func() { _ = cs.Close() }()
 	// Source repo A with two chained revisions.
-	repoA, _ := cs.Create(store.RepoRef{Namespace: "a", Name: "r"})
+	repoA, _ := cs.Create(store.NSRef{Name: "a" + "/" + "r"})
 	wsA := revision.NewWorkspace(repoA)
 	_, r1, err := wsA.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{{Path: "a.txt", Content: []byte("1")}}, "one", store.Author{Name: "t"}, "")
 	if err != nil {
@@ -90,7 +90,7 @@ func TestImportIntoFreshRepoGeneratesNewIDs(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", home)
 	cs, _ := store.OpenDefault()
 	defer func() { _ = cs.Close() }()
-	repoA, _ := cs.Create(store.RepoRef{Namespace: "a", Name: "r"})
+	repoA, _ := cs.Create(store.NSRef{Name: "a" + "/" + "r"})
 	wsA := revision.NewWorkspace(repoA)
 	_, r1, _ := wsA.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{{Path: "a.txt", Content: []byte("1")}}, "one", store.Author{Name: "t"}, "")
 	dest := t.TempDir() + "/dest.git"
@@ -104,7 +104,7 @@ func TestImportIntoFreshRepoGeneratesNewIDs(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", homeB)
 	csB, _ := store.OpenDefault()
 	defer func() { _ = csB.Close() }()
-	repoB, _ := csB.Create(store.RepoRef{Namespace: "b", Name: "r"})
+	repoB, _ := csB.Create(store.NSRef{Name: "b" + "/" + "r"})
 	wsB := revision.NewWorkspace(repoB)
 	revs, err := ImportBranch(wsB, repoB, ImportOptions{Source: dest, Branch: "main"})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestImportDepth(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cs.Close() }()
-	repoA, _ := cs.Create(store.RepoRef{Namespace: "a", Name: "r"})
+	repoA, _ := cs.Create(store.NSRef{Name: "a" + "/" + "r"})
 	wsA := revision.NewWorkspace(repoA)
 	_, r1, _ := wsA.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{{Path: "a.txt", Content: []byte("1")}}, "one", store.Author{Name: "t"}, "")
 	s1, _ := wsA.GetSnapshot(r1.Hash)
@@ -162,7 +162,7 @@ func TestImportDepth(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", homeB)
 	csB, _ := store.OpenDefault()
 	defer func() { _ = csB.Close() }()
-	repoB, _ := csB.Create(store.RepoRef{Namespace: "b", Name: "r"})
+	repoB, _ := csB.Create(store.NSRef{Name: "b" + "/" + "r"})
 	wsB := revision.NewWorkspace(repoB)
 	revs, err := ImportBranch(wsB, repoB, ImportOptions{Source: dest, Branch: "main", Depth: 1})
 	if err != nil {
@@ -185,7 +185,7 @@ func TestExportImportTags(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", home)
 	cs, _ := store.OpenDefault()
 	defer func() { _ = cs.Close() }()
-	repoA, _ := cs.Create(store.RepoRef{Namespace: "a", Name: "r"})
+	repoA, _ := cs.Create(store.NSRef{Name: "a" + "/" + "r"})
 	wsA := revision.NewWorkspace(repoA)
 	_, r1, err := wsA.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{{Path: "a.txt", Content: []byte("1")}}, "one", store.Author{Name: "t"}, "")
 	if err != nil {
@@ -218,7 +218,7 @@ func TestExportImportTags(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", homeB)
 	csB, _ := store.OpenDefault()
 	defer func() { _ = csB.Close() }()
-	repoB, _ := csB.Create(store.RepoRef{Namespace: "b", Name: "r"})
+	repoB, _ := csB.Create(store.NSRef{Name: "b" + "/" + "r"})
 	wsB := revision.NewWorkspace(repoB)
 	if _, err := ImportBranch(wsB, repoB, ImportOptions{Source: dest, Branch: "main"}); err != nil {
 		t.Fatal(err)
@@ -239,7 +239,7 @@ func TestExportSquash(t *testing.T) {
 	t.Setenv("EASYVCS_HOME", home)
 	cs, _ := store.OpenDefault()
 	defer func() { _ = cs.Close() }()
-	repoA, _ := cs.Create(store.RepoRef{Namespace: "a", Name: "r"})
+	repoA, _ := cs.Create(store.NSRef{Name: "a" + "/" + "r"})
 	wsA := revision.NewWorkspace(repoA)
 	_, r1, err := wsA.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{{Path: "a.txt", Content: []byte("1")}}, "one", store.Author{Name: "t"}, "")
 	if err != nil {

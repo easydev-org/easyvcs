@@ -166,12 +166,12 @@ func EncodeObject(o *Object) ([]byte, error) {
 // sanity check. Trees are recognized by the presence of the compact binary
 // encoding (whose first field is a varint); blob content is passed through.
 func DecodeObject(id ID, payload []byte) (*Object, error) {
-	// A zero-length payload is a LEGAL empty blob (an empty file). Trees and
-	// conflicts always carry a magic header, so a 0-byte payload can only be a
-	// blob. Do NOT reject it: doing so 500s a git clone of any tree that
-	// references an empty file.
+	// An empty payload is a valid empty BLOB (a 0-byte file). EncodeObject
+	// returns o.Blob verbatim, so an empty blob encodes to zero bytes; decoding
+	// must round-trip it. (Rejecting it broke snapshots that contain empty
+	// files, e.g. the VM boot-support stubs.)
 	if len(payload) == 0 {
-		return &Object{Kind: KindBlob, Blob: nil}, nil
+		return &Object{Kind: KindBlob, Blob: []byte{}}, nil
 	}
 	// Detect known magic headers in order: conflict (either form) first, then
 	// tree. IsConflictPayload recognizes both the legacy v1 and path-bearing v2

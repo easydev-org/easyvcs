@@ -157,7 +157,7 @@ func TestCLICloneLocal(t *testing.T) {
 	srcHome := t.TempDir()
 	t.Setenv("EASYVCS_HOME", srcHome)
 	csA, _ := store.OpenDefault()
-	srcRepo, err := csA.Create(store.RepoRef{Namespace: "team", Name: "app"})
+	srcRepo, err := csA.Create(store.NSRef{Name: "team" + "/" + "app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestCLICloneLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 	srcDir := t.TempDir()
-	if err := store.WriteMarker(srcDir, &store.WorkspaceMarker{Repo: srcRepo.RepoRef(), Home: srcHome}); err != nil {
+	if err := store.WriteMarker(srcDir, &store.WorkspaceMarker{Repo: srcRepo.NSRef(), Home: srcHome}); err != nil {
 		t.Fatal(err)
 	}
 

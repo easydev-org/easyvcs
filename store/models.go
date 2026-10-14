@@ -15,72 +15,60 @@ import (
 // (there is no separate tenant — user ≡ tenant). A user owns NAMESPACES; a
 // namespace is owned by exactly one user. A repository lives under a namespace,
 // so its owner (the namespace owner) is unambiguous. Additional collaborators
-// are granted per-repository roles (maintainer / developer) via repo_members.
+// are granted per-repository roles (maintainer / developer) via namespace_members.
 
 // repositories table. (Namespace, name) is globally unique: a repository is
 // addressed as namespace/name (GitHub-like), and its owner is the namespace
 // owner (denormalized into owner_user_id for fast authorization).
-type repoRow struct {
-	ID             int64  `gorm:"primaryKey;autoIncrement"`
-	OwnerUserID    int64  `gorm:"not null;default:0"`
-	Namespace      string `gorm:"not null;uniqueIndex:idx_repo"`
-	Name           string `gorm:"not null;uniqueIndex:idx_repo"`
-	Created        int64  `gorm:"not null"`
-	Description    string `gorm:"not null;default:''"`
-	Visibility     string `gorm:"not null;default:'public'"`
-	DefaultBranch  string `gorm:"column:default_branch;not null;default:'main'"`
-	Kind           string `gorm:"not null;default:'normal'"`
-	MirrorURL      string `gorm:"column:mirror_url;not null;default:''"`
-	MirrorBranch   string `gorm:"column:mirror_branch;not null;default:'main'"`
-	MirrorInterval int64  `gorm:"column:mirror_interval;not null;default:300"`
-	MirrorLastRev  string `gorm:"column:mirror_last_rev;not null;default:''"`
-	MirrorLastSync int64  `gorm:"column:mirror_last_sync;not null;default:0"`
-	MirrorLastErr  string `gorm:"column:mirror_last_error;not null;default:''"`
-	MirrorToken    string `gorm:"column:mirror_token;not null;default:''"`
-	// ProtectedBranches is a JSON array of branch names that may only change
-	// through a merged Revision Request (direct push is refused). New repos
-	// default to ["main"]. Empty = no protection (behaviour identical to before
-	// this feature).
-	ProtectedBranches string `gorm:"column:protected_branches;not null;default:''"`
-}
-
-func (repoRow) TableName() string { return "repositories" }
 
 // namespaces table. A namespace (org) is owned by exactly one user and its name
-// is globally unique (so namespace/name addresses a repository unambiguously).
-// A user may own many namespaces.
+// is globally unique. A user may own many namespaces. A namespace IS the
+// container: there is no separate repository entity (see
+// docs/namespace-container.md) — the "repository" of old is a PATH within it.
 type namespaceRow struct {
-	ID          int64  `gorm:"primaryKey;autoIncrement"`
-	OwnerUserID int64  `gorm:"not null"`
-	Name        string `gorm:"not null;uniqueIndex:idx_namespace"`
-	Created     int64  `gorm:"not null"`
+	ID                int64  `gorm:"primaryKey;autoIncrement"`
+	OwnerUserID       int64  `gorm:"not null"`
+	Name              string `gorm:"not null;uniqueIndex:idx_namespace"`
+	Created           int64  `gorm:"not null"`
+	Description       string `gorm:"not null;default:''"`
+	Visibility        string `gorm:"not null;default:'private'"`
+	DefaultBranch     string `gorm:"column:default_branch;not null;default:'main'"`
+	Kind              string `gorm:"not null;default:'normal'"`
+	MirrorURL         string `gorm:"column:mirror_url;not null;default:''"`
+	MirrorBranch      string `gorm:"column:mirror_branch;not null;default:'main'"`
+	MirrorInterval    int64  `gorm:"column:mirror_interval;not null;default:300"`
+	MirrorLastRev     string `gorm:"column:mirror_last_rev;not null;default:''"`
+	MirrorLastSync    int64  `gorm:"column:mirror_last_sync;not null;default:0"`
+	MirrorLastErr     string `gorm:"column:mirror_last_error;not null;default:''"`
+	MirrorToken       string `gorm:"column:mirror_token;not null;default:''"`
+	ProtectedBranches string `gorm:"column:protected_branches;not null;default:''"`
 }
 
 func (namespaceRow) TableName() string { return "namespaces" }
 
-// repo_members table grants a user a non-owner role on a repository. The owner
-// is NOT stored here: it is derived from the repository's namespace owner
-// (repoRow.OwnerUserID). Roles: "maintainer" | "developer".
-type repoMemberRow struct {
-	RepoID    int64  `gorm:"primaryKey;not null"`
-	UserID    int64  `gorm:"primaryKey;not null"`
-	Role      string `gorm:"not null;default:'developer'"`
-	GrantedBy *int64
-	Created   int64 `gorm:"not null"`
+// namespace_members table grants a user a non-owner role on a NAMESPACE. The
+// owner is NOT stored here: it is derived from the namespace owner
+// (namespaceRow.OwnerUserID). Roles: "maintainer" | "developer".
+type namespaceMemberRow struct {
+	NamespaceID int64  `gorm:"primaryKey;not null"`
+	UserID      int64  `gorm:"primaryKey;not null"`
+	Role        string `gorm:"not null;default:'developer'"`
+	GrantedBy   *int64
+	Created     int64 `gorm:"not null"`
 }
 
-func (repoMemberRow) TableName() string { return "repo_members" }
+func (namespaceMemberRow) TableName() string { return "namespace_members" }
 
 // push_mirrors table.
 type pushMirrorRow struct {
-	ID        int64  `gorm:"primaryKey;autoIncrement"`
-	RepoID    int64  `gorm:"not null;uniqueIndex:idx_pushmirror"`
-	Name      string `gorm:"not null;uniqueIndex:idx_pushmirror"`
-	URL       string `gorm:"not null"`
-	Branch    string `gorm:"not null;default:'main'"`
-	Token     string `gorm:"not null;default:''"`
-	LastRev   string `gorm:"not null;default:''"`
-	LastError string `gorm:"not null;default:''"`
+	ID          int64  `gorm:"primaryKey;autoIncrement"`
+	NamespaceID int64  `gorm:"not null;uniqueIndex:idx_pushmirror"`
+	Name        string `gorm:"not null;uniqueIndex:idx_pushmirror"`
+	URL         string `gorm:"not null"`
+	Branch      string `gorm:"not null;default:'main'"`
+	Token       string `gorm:"not null;default:''"`
+	LastRev     string `gorm:"not null;default:''"`
+	LastError   string `gorm:"not null;default:''"`
 }
 
 // objects table (global, content-addressed).
@@ -92,17 +80,17 @@ type objectRow struct {
 
 // snapshots table.
 type snapshotRow struct {
-	RepoID     int64  `gorm:"primaryKey;not null"`
-	ID         string `gorm:"primaryKey;column:sha;not null"`
-	RevisionID string `gorm:"not null"`
-	TreeID     string `gorm:"not null"`
-	CommitTime int64  `gorm:"not null"`
-	Meta       []byte `gorm:"not null"`
+	NamespaceID int64  `gorm:"primaryKey;not null"`
+	ID          string `gorm:"primaryKey;column:sha;not null"`
+	RevisionID  string `gorm:"not null"`
+	TreeID      string `gorm:"not null"`
+	CommitTime  int64  `gorm:"not null"`
+	Meta        []byte `gorm:"not null"`
 }
 
 // revisions table.
 type revisionRow struct {
-	RepoID      int64  `gorm:"primaryKey;not null"`
+	NamespaceID int64  `gorm:"primaryKey;not null"`
 	ID          string `gorm:"primaryKey;not null"`
 	Hash        string `gorm:"not null"`
 	Created     int64  `gorm:"not null"`
@@ -113,20 +101,20 @@ type revisionRow struct {
 // revisionPathDirRow indexes which DIRECTORY prefixes a revision touched: for
 // every changed path, each of its ancestor directories is a row. It backs
 // "subdirectory as a repository": the revisions that touch a subpath P are
-// exactly those with a row (repo_id, dir=P). Because every subtree in easyvcs is
+// exactly those with a row (namespace_id, dir=P). Because every subtree in easyvcs is
 // already a content-addressed object, this index is all that is needed to treat
 // any subpath as a (recursive) repository — no content is duplicated.
 type revisionPathDirRow struct {
-	RepoID     int64  `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:3"`
-	Dir        string `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:1"`
-	RevisionID string `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:2"`
+	NamespaceID int64  `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:3"`
+	Dir         string `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:1"`
+	RevisionID  string `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:2"`
 }
 
 func (revisionPathDirRow) TableName() string { return "revision_path_dirs" }
 
 // refs table.
 type refRow struct {
-	RepoID int64 `gorm:"primaryKey;not null"`
+	NamespaceID int64 `gorm:"primaryKey;not null"`
 	// Path is the SCOPE this ref belongs to ("" = the root scope). A ref lives
 	// in exactly one scope; the root scope's refs project down to sub-scopes
 	// (see docs/subrepo-scopes.md).
@@ -140,14 +128,14 @@ type refRow struct {
 type workspaceRow struct {
 	ID              int64   `gorm:"primaryKey;autoIncrement"`
 	Path            string  `gorm:"uniqueIndex"`
-	RepoID          int64   `gorm:"not null"`
+	NamespaceID     int64   `gorm:"not null"`
 	CurrentRevision *string `gorm:"column:current_revision"`
 	Branch          *string
 }
 
 // remotes table.
 type remoteRow struct {
-	RepoID        int64  `gorm:"primaryKey;not null"`
+	NamespaceID   int64  `gorm:"primaryKey;not null"`
 	Name          string `gorm:"primaryKey;not null"`
 	URL           string `gorm:"not null"`
 	Token         *string
@@ -158,11 +146,11 @@ type remoteRow struct {
 
 // remote_refs table.
 type remoteRefRow struct {
-	RepoID     int64  `gorm:"primaryKey;not null"`
-	RemoteName string `gorm:"primaryKey;not null"`
-	Kind       string `gorm:"primaryKey;not null"`
-	Name       string `gorm:"primaryKey;not null"`
-	Target     string `gorm:"not null"`
+	NamespaceID int64  `gorm:"primaryKey;not null"`
+	RemoteName  string `gorm:"primaryKey;not null"`
+	Kind        string `gorm:"primaryKey;not null"`
+	Name        string `gorm:"primaryKey;not null"`
+	Target      string `gorm:"not null"`
 }
 
 // users table. A user is simultaneously the identity (credentials, audit) and
@@ -204,9 +192,9 @@ type tokenRow struct {
 // computed against the CURRENT tip. There is exactly one source form — a
 // snapshot — so there is no source kind or source revision column.
 type revisionRequestRow struct {
-	ID     int64 `gorm:"primaryKey;autoIncrement"`
-	RepoID int64 `gorm:"not null;uniqueIndex:idx_rr"`
-	IID    int64 `gorm:"column:iid;not null;uniqueIndex:idx_rr"`
+	ID          int64 `gorm:"primaryKey;autoIncrement"`
+	NamespaceID int64 `gorm:"not null;uniqueIndex:idx_rr"`
+	IID         int64 `gorm:"column:iid;not null;uniqueIndex:idx_rr"`
 	// SourceSnapshot is the PINNED content-addressed snapshot under review.
 	SourceSnapshot string `gorm:"not null"`
 	// BaseSnapshot is the PINNED target tip snapshot at creation time.
@@ -261,10 +249,10 @@ func (rrMergeRow) TableName() string { return "rr_merge" }
 // bridge. It is plain easyvcs metadata (never stored as a .git object); it lets
 // an easyvcs revision be correlated back to a commit sha for the same repo.
 type gitRevisionLinkRow struct {
-	ID         int64  `gorm:"primaryKey;autoIncrement"`
-	RepoID     int64  `gorm:"not null;uniqueIndex:idx_gitlink"`
-	RevisionID string `gorm:"not null;uniqueIndex:idx_gitlink"`
-	CommitSHA  string `gorm:"not null;uniqueIndex:idx_gitlink"`
+	ID          int64  `gorm:"primaryKey;autoIncrement"`
+	NamespaceID int64  `gorm:"not null;uniqueIndex:idx_gitlink"`
+	RevisionID  string `gorm:"not null;uniqueIndex:idx_gitlink"`
+	CommitSHA   string `gorm:"not null;uniqueIndex:idx_gitlink"`
 	// Ref is the git ref the commit was exported under (e.g. refs/heads/main).
 	Ref string `gorm:"not null;default:''"`
 	// Side is "export" (revision -> git) or "import" (git -> revision).
@@ -299,10 +287,10 @@ func (auditLogRow) TableName() string { return "audit_log" }
 // allModels returns every table model for AutoMigrate.
 func allModels() []any {
 	return []any{
-		&repoRow{}, &pushMirrorRow{}, &objectRow{}, &snapshotRow{}, &revisionRow{},
+		&pushMirrorRow{}, &objectRow{}, &snapshotRow{}, &revisionRow{},
 		&revisionPathDirRow{},
 		&refRow{}, &workspaceRow{}, &remoteRow{}, &remoteRefRow{},
-		&userRow{}, &tokenRow{}, &namespaceRow{}, &repoMemberRow{},
+		&userRow{}, &tokenRow{}, &namespaceRow{}, &namespaceMemberRow{},
 		&revisionRequestRow{}, &rrUpdateRow{}, &rrMergeRow{},
 		&rrReviewRow{}, &rrCommentRow{},
 		&gitRevisionLinkRow{}, &auditLogRow{},

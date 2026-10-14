@@ -120,13 +120,13 @@ Server endpoints (all under `/api/v1`) are documented in `docs/api.md`.
 ### Clone a repository with plain git
 
 ```
-git clone http://<user>:<token>@<server>/api/v1/repos/{ns}/{name}
+git clone http://<user>:<token>@<server>/api/v1/namespaces/{ns}
 ```
 
 Read-only (`git-upload-pack`); there is no `git push` (writes go through the
 easyvcs API / Revision Requests). Because the clone URL is a normal git remote,
 a repository can be consumed as a **package**: e.g. a Go module
-(`GOPROXY=direct`), `npm i git+http://<user>:<token>@<server>/api/v1/repos/{ns}/{name}#<tag>`,
+(`GOPROXY=direct`), `npm i git+http://<user>:<token>@<server>/api/v1/namespaces/{ns}#<tag>`,
 `pip install git+http://...`, Cargo `git = "..."`, Composer, etc.
 
 **Monorepo: every subdirectory is its own git endpoint.** Append the subdir to
@@ -134,8 +134,8 @@ the clone URL and that subtree is served as an independent repository (its own
 history = the commits that touch that path), so each subdir can be a package:
 
 ```
-git clone http://<user>:<token>@<server>/api/v1/repos/{ns}/{name}/<subdir>
-npm i git+http://<user>:<token>@<server>/api/v1/repos/{ns}/{name}/<subdir>.git
+git clone http://<user>:<token>@<server>/api/v1/namespaces/{ns}/<subdir>
+npm i git+http://<user>:<token>@<server>/api/v1/namespaces/{ns}/<subdir>.git
 ```
 
 ## Build
@@ -166,7 +166,7 @@ at this Service via
 ## Propose without a branch (`POST /snapshot`)
 
 A Revision Request's source is a **snapshot**, not a branch, so a change does
-not need a branch to be proposed. `POST /api/v1/repos/{ns}/{name}/snapshot`
+not need a branch to be proposed. `POST /api/v1/namespaces/{ns}/snapshot`
 builds a revision + snapshot from a **file-op set** and **moves no ref**
 (`requirePropose`; developer and above, so owner/maintainer are included too):
 
@@ -180,7 +180,7 @@ builds a revision + snapshot from a **file-op set** and **moves no ref**
 // -> {"ok":true,"revision_id":"…","snapshot":"…"}
 ```
 
-Then open the request with `POST /api/v1/repos/{ns}/{name}/rr
+Then open the request with `POST /api/v1/namespaces/{ns}/rr
 {"source_snapshot":"<snapshot>","target_branch":"main"}`. **Set `parents` to the
 snapshot the working copy was based on** (and send the full create/update/delete
 diff): with an omitted `parents` (the empty tree) a merge would treat every file

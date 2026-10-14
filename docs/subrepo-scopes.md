@@ -117,13 +117,13 @@ lift(Q, 改动集):
 
 ### 7.1 子目录专属 branch（真 ref）
 ```
-PUT /api/v1/repos/{ns}/{name}/refs   { path:"frontend", name:"feature-x", target:<rev> }
+PUT /api/v1/namespaces/{ns}/refs   { path:"frontend", name:"feature-x", target:<rev> }
 ```
 存 `refs(repo, "frontend", "feature-x", ...)`。**往上不可见**。
 
 ### 7.2 根 branch 在子 scope（投影）
 ```
-GET /api/v1/repos/{ns}/{name}/refs?path=frontend
+GET /api/v1/namespaces/{ns}/refs?path=frontend
   → 含 { name:"main", path:"", projected:true }（读时计算）
 ```
 
@@ -159,7 +159,7 @@ scope 的 refs 投影**恰好**定义了 `git clone .../{ns}/{name}/{subdir}` �
 的 refs。因此：
 
 ```
-git clone http://u:t@host/api/v1/repos/easydev-org/easyagent/frontend
+git clone http://u:t@host/api/v1/namespaces/easydev-org/easyagent/frontend
   → 该 scope 的投影 refs + 专属 refs
 npm i git+http://.../easydev-org/easyagent/frontend.git
 ```

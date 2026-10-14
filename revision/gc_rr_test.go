@@ -18,7 +18,7 @@ func TestGCRetainsOpenRRSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = cs.SetWAL()
-	repo, err := cs.Create(store.RepoRef{Namespace: "team", Name: "app"})
+	repo, err := cs.Create(store.NSRef{Name: "team" + "/" + "app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestGCRetainsOpenRRSnapshots(t *testing.T) {
 	}
 
 	// Register an RR pinning that snapshot (no branch behind it).
-	if _, err := cs.CreateRevisionRequest(repo.RepoID(), &store.RevisionRequest{
+	if _, err := cs.CreateRevisionRequest(repo.NamespaceID(), &store.RevisionRequest{
 		SourceSnapshot: src.RevisionHash.String(),
 		BaseSnapshot:   base.RevisionHash.String(), TargetBranch: "main",
 		State: store.RROpen, Title: "rr-only",

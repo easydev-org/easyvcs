@@ -104,7 +104,7 @@ func untarGz(t *testing.T, data []byte) (files map[string][]byte, dirs map[strin
 func TestArchiveMainTarGz(t *testing.T) {
 	_, mux, token, _ := archiveRepo(t)
 
-	rec := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/archive/main.tar.gz", token, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/archive/main.tar.gz", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("archive: %d %s", rec.Code, rec.Body.String())
 	}
@@ -149,7 +149,7 @@ func TestArchiveEmptyRepoIsValidTarGz(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/archive/main.tar.gz", token, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/archive/main.tar.gz", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("empty archive: %d %s", rec.Code, rec.Body.String())
 	}
@@ -161,7 +161,7 @@ func TestArchiveEmptyRepoIsValidTarGz(t *testing.T) {
 
 func TestArchiveUnknownRef404(t *testing.T) {
 	_, mux, token, _ := archiveRepo(t)
-	rec := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/archive/nope.tar.gz", token, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/archive/nope.tar.gz", token, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown ref = %d, want 404", rec.Code)
 	}
@@ -169,7 +169,7 @@ func TestArchiveUnknownRef404(t *testing.T) {
 
 func TestArchiveMissingSuffix400(t *testing.T) {
 	_, mux, token, _ := archiveRepo(t)
-	rec := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/archive/main", token, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/archive/main", token, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing .tar.gz = %d, want 400", rec.Code)
 	}
@@ -180,7 +180,7 @@ func TestArchivePrivateRepoAnonymousForbidden(t *testing.T) {
 	if err := repo.UpdateRepoMeta(store.RepoMeta{Visibility: "private", DefaultBranch: "main"}); err != nil {
 		t.Fatal(err)
 	}
-	rec := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/archive/main.tar.gz", "", nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/archive/main.tar.gz", "", nil)
 	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
 		t.Fatalf("anonymous private archive = %d, want 401/403", rec.Code)
 	}
@@ -198,7 +198,7 @@ func TestArchiveReadsByRefAndRevision(t *testing.T) {
 	if _, err := ws.SetRef("v1", store.RefTag, tip.Target); err != nil {
 		t.Fatal(err)
 	}
-	rec := hreq(mux, http.MethodGet, "/api/v1/repos/team/app/archive/v1.tar.gz", token, nil)
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/archive/v1.tar.gz", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("archive by tag: %d %s", rec.Code, rec.Body.String())
 	}
@@ -208,7 +208,7 @@ func TestArchiveReadsByRefAndRevision(t *testing.T) {
 	}
 
 	// And by raw revision id.
-	rec = hreq(mux, http.MethodGet, "/api/v1/repos/team/app/archive/"+tip.Target+".tar.gz", token, nil)
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team/app/archive/"+tip.Target+".tar.gz", token, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("archive by revision id: %d %s", rec.Code, rec.Body.String())
 	}

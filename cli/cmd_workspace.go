@@ -24,11 +24,11 @@ func cmdInit(c *ctx) {
 	if len(args) > 1 {
 		dir = args[1]
 	}
-	repo, err := c.cs.Create(store.RepoRef{Namespace: ns, Name: name})
+	repo, err := c.cs.Create(store.NSRef{Name: ns + "/" + name})
 	if err != nil {
 		c.fatal("init:", err)
 	}
-	if err := store.WriteMarker(dir, &store.WorkspaceMarker{Repo: repo.RepoRef()}); err != nil {
+	if err := store.WriteMarker(dir, &store.WorkspaceMarker{Repo: repo.NSRef()}); err != nil {
 		c.fatal("init:", err)
 	}
 	fmt.Printf("initialized repository %s/%s, workspace bound at %s\n", ns, name, dir)
@@ -89,7 +89,7 @@ func cmdClone(c *ctx) {
 
 	// Determine the source repo ref: for a local path use the target marker's
 	// repo; for an http(s) URL derive it from the path.
-	srcRef := store.RepoRef{}
+	srcRef := store.NSRef{}
 	if isLocalURL(url) {
 		m, err := store.LookupMarker(expandLocalPath(url))
 		if err != nil {
@@ -101,13 +101,19 @@ func cmdClone(c *ctx) {
 		if ns == "" {
 			ns = "default"
 		}
-		srcRef = store.RepoRef{Namespace: ns, Name: name}
+		srcRef = store.NSRef{Name: ns + "/" + name}
 	}
-	if namespace != "" {
-		srcRef.Namespace = namespace
-	}
-	if repoName != "" {
-		srcRef.Name = repoName
+	if namespace != "" || repoName != "" {
+		// The container name is "ns/name" (a slash-named namespace).
+		nsPart := namespace
+		if nsPart == "" {
+			nsPart = topOf(srcRef.Name)
+		}
+		nmPart := repoName
+		if nmPart == "" {
+			nmPart = bottomOf(srcRef.Name)
+		}
+		srcRef = store.NSRef{Name: nsPart + "/" + nmPart}
 	}
 
 	// Create the destination repo (fresh central store for the clone).
@@ -126,10 +132,10 @@ func cmdClone(c *ctx) {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		c.fatal("clone:", err)
 	}
-	if err := store.WriteMarker(destDir, &store.WorkspaceMarker{Repo: dstRepo.RepoRef(), Home: home}); err != nil {
+	if err := store.WriteMarker(destDir, &store.WorkspaceMarker{Repo: dstRepo.NSRef(), Home: home}); err != nil {
 		c.fatal("clone:", err)
 	}
-	if err := cs.PutWorkspace(&store.WorkspaceRow{Path: destDir, Repo: dstRepo.RepoRef(), Branch: branch}); err != nil {
+	if err := cs.PutWorkspace(&store.WorkspaceRow{Path: destDir, Repo: dstRepo.NSRef(), Branch: branch}); err != nil {
 		c.fatal("clone:", err)
 	}
 
@@ -225,11 +231,11 @@ func cmdWorkspaceAttach(c *ctx) {
 		if err != nil {
 			c.fatal("workspace attach:", err)
 		}
-		repo, err := c.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: name})
+		repo, err := c.cs.OpenRepo(store.NSRef{Name: ns + "/" + name})
 		if err != nil {
 			c.fatal("workspace attach:", err)
 		}
-		marker = &store.WorkspaceMarker{Repo: repo.RepoRef()}
+		marker = &store.WorkspaceMarker{Repo: repo.NSRef()}
 		if err := store.WriteMarker(".", marker); err != nil {
 			c.fatal("workspace attach:", err)
 		}

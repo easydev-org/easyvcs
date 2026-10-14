@@ -128,7 +128,7 @@ func (s *CentralStore) DeleteUser(id int64) error {
 		}
 	}
 	// Repo member grants this user holds on OTHER repos.
-	if err := s.d.gdb.Where("user_id=?", id).Delete(&repoMemberRow{}).Error; err != nil {
+	if err := s.d.gdb.Where("user_id=?", id).Delete(&namespaceMemberRow{}).Error; err != nil {
 		return err
 	}
 	if err := s.d.gdb.Where("user_id=?", id).Delete(&tokenRow{}).Error; err != nil {
@@ -237,7 +237,7 @@ func (s *CentralStore) TenantHasNamespace(userID int64, namespace string) bool {
 // ---- per-repository collaborator roles ----
 
 // Repository roles. The owner is derived from the namespace owner and is not
-// stored as a repo_members row; maintainer/developer are explicit grants.
+// stored as a namespace_members row; maintainer/developer are explicit grants.
 const (
 	RoleMaintainer = "maintainer"
 	RoleDeveloper  = "developer"
@@ -245,9 +245,9 @@ const (
 
 // RepoMember is a user's non-owner role on a repository.
 type RepoMember struct {
-	RepoID int64
-	UserID int64
-	Role   string
+	NamespaceID int64
+	UserID      int64
+	Role        string
 }
 
 // validRepoRole reports whether role is a grantable collaborator role.
@@ -257,37 +257,37 @@ func validRepoRole(role string) bool {
 
 // SetRepoMember grants or updates a user's role on a repository. Owner cannot
 // be granted here (the owner is the namespace owner).
-func (s *CentralStore) SetRepoMember(repoID, userID int64, role string, grantedBy *int64) error {
+func (s *CentralStore) SetRepoMember(namespaceID, userID int64, role string, grantedBy *int64) error {
 	if !validRepoRole(role) {
 		return errors.New("store: repo role must be maintainer or developer")
 	}
-	row := &repoMemberRow{RepoID: repoID, UserID: userID, Role: role, GrantedBy: grantedBy, Created: time.Now().UTC().UnixMilli()}
+	row := &namespaceMemberRow{NamespaceID: namespaceID, UserID: userID, Role: role, GrantedBy: grantedBy, Created: time.Now().UTC().UnixMilli()}
 	return s.d.gdb.Clauses(gormConflictUpdateAll()).Create(row).Error
 }
 
 // RemoveRepoMember revokes a user's role on a repository.
-func (s *CentralStore) RemoveRepoMember(repoID, userID int64) error {
-	return s.d.gdb.Where("repo_id=? AND user_id=?", repoID, userID).Delete(&repoMemberRow{}).Error
+func (s *CentralStore) RemoveRepoMember(namespaceID, userID int64) error {
+	return s.d.gdb.Where("namespace_id=? AND user_id=?", namespaceID, userID).Delete(&namespaceMemberRow{}).Error
 }
 
 // ListRepoMembers returns the explicit (non-owner) members of a repository.
-func (s *CentralStore) ListRepoMembers(repoID int64) ([]*RepoMember, error) {
-	var rows []repoMemberRow
-	if err := s.d.gdb.Where("repo_id=?", repoID).Order("user_id").Find(&rows).Error; err != nil {
+func (s *CentralStore) ListRepoMembers(namespaceID int64) ([]*RepoMember, error) {
+	var rows []namespaceMemberRow
+	if err := s.d.gdb.Where("namespace_id=?", namespaceID).Order("user_id").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*RepoMember, 0, len(rows))
 	for i := range rows {
-		out = append(out, &RepoMember{RepoID: rows[i].RepoID, UserID: rows[i].UserID, Role: rows[i].Role})
+		out = append(out, &RepoMember{NamespaceID: rows[i].NamespaceID, UserID: rows[i].UserID, Role: rows[i].Role})
 	}
 	return out, nil
 }
 
 // RepoMemberRole returns the explicit role a user holds on a repo ("" when a
 // collaborator grant is absent).
-func (s *CentralStore) RepoMemberRole(repoID, userID int64) (string, error) {
-	var row repoMemberRow
-	err := s.d.gdb.Where("repo_id=? AND user_id=?", repoID, userID).First(&row).Error
+func (s *CentralStore) RepoMemberRole(namespaceID, userID int64) (string, error) {
+	var row namespaceMemberRow
+	err := s.d.gdb.Where("namespace_id=? AND user_id=?", namespaceID, userID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil
 	}

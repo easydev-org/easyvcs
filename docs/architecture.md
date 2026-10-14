@@ -139,9 +139,9 @@ easyvcs request list|show|diff|update|merge <iid>                          评�
 
 change-native 智能协议（HTTP/JSON + 二进制 bundle，h1+h2c 双栈）。**所有端点统一在 `/api/v1` 前缀下**（完整清单见 `docs/api.md`）：
 
-- `POST /api/v1/repos/{ns}/{name}/advertise`  读权限（列出 revision/ref + 每个 revision 的当前快照 hash）
-- `POST /api/v1/repos/{ns}/{name}/fetch`      读权限（增量 bundle）
-- `POST /api/v1/repos/{ns}/{name}/push`       写权限（owner）+ 非快进拒绝 + 原子事务
+- `POST /api/v1/namespaces/{ns}/advertise`  读权限（列出 revision/ref + 每个 revision 的当前快照 hash）
+- `POST /api/v1/namespaces/{ns}/fetch`      读权限（增量 bundle）
+- `POST /api/v1/namespaces/{ns}/push`       写权限（owner）+ 非快进拒绝 + 原子事务
 
 此外 server 还提供两类同前缀的面：
 - **托管面**（身份/令牌、orgs/repos、refs、内容浏览）——见 `server/hosting.go`。
@@ -238,7 +238,7 @@ EasyVCS 通过 **go-git** 与真实 git 仓库走 **smart protocol** 互操作�
 - **受保护分支只能经「已合并的 Revision Request」推进**：直接 push 若会移动受保护分支一律拒绝（403，`error: protected-branch`）；no-op（目标 ref 不变）放行；对象/snapshot 不受影响。
 - 检查在 push 的每 repo 锁内、非快进检查之前执行，故不可被并发 push 绕过；RR 合并走 `rr.ApplyMerge`，**不经** push 路径，是唯一的合法豁免。
 - 这是旧 gateway `ProtectMain` 的引擎级替代：不变量由引擎自身编码，而非外部工具。
-- 查看/设置：`GET/PUT /api/v1/repos/{ns}/{name}/protected-branches`（见 docs/api.md）。
+- 查看/设置：`GET/PUT /api/v1/namespaces/{ns}/protected-branches`（见 docs/api.md）。
 
 ### 审计
 - `AuditSink` 接口 + `audit_log` 表（append-only，无 undo）。
