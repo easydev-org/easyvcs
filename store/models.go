@@ -17,10 +17,6 @@ import (
 // so its owner (the namespace owner) is unambiguous. Additional collaborators
 // are granted per-repository roles (maintainer / developer) via namespace_members.
 
-// repositories table. (Namespace, name) is globally unique: a repository is
-// addressed as namespace/name (GitHub-like), and its owner is the namespace
-// owner (denormalized into owner_user_id for fast authorization).
-
 // namespaces table. A namespace (org) is owned by exactly one user and its name
 // is globally unique. A user may own many namespaces. A namespace IS the
 // container: there is no separate repository entity (see
@@ -154,8 +150,8 @@ type remoteRefRow struct {
 }
 
 // users table. A user is simultaneously the identity (credentials, audit) and
-// the ownership boundary: it owns namespaces and repositories, and is bound to
-// one abcp-agent tenant. `Disabled` stops the user's credentials from
+// the ownership boundary: it owns namespaces (the only container), and is bound
+// to one abcp-agent tenant. `Disabled` stops the user's credentials from
 // authenticating anywhere.
 type userRow struct {
 	ID          int64  `gorm:"primaryKey;autoIncrement"`
