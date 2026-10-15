@@ -64,6 +64,23 @@ SetWAL** —— 打开 DB 与 `PRAGMA journal_mode=WAL` 都是写操作，纯读
 | **对象级 push delta**（Bloom）| 不再重传服务端已有对象 |
 | **只读命令懒开库** | 冷启动 ↓（不 SetWAL/不迁移）|
 
+## 4c. Postgres 基准（验证异步索引的收益）
+
+同一提交负载在 **Postgres 17**（本机）上：
+
+| 基准 | 结果 |
+|---|---|
+| `BenchmarkPGCommitSyncIndex` | **~909 µs/commit** |
+| `BenchmarkPGCommitAsyncIndex` | **~570 µs/commit** |
+| **提升** | **~37%** |
+| `BenchmarkPGRevisionsTouching` | **~79 µs**（与 SQLite 同级）|
+
+**关键对比**：异步索引在 **SQLite ~11%**、**Postgres ~37%**。原因：SQLite 是
+**单连接**（后台 worker 与提交争同一连接），而 **Postgres 的 worker 用独立连接**，
+提交**完全不等待**索引写。**这正是异步索引的设计目标**。
+
+（运行：`EASYVCS_TEST_PG_DSN='postgresql://…?client_encoding=UTF8' go test ./store/ -run '^$' -bench BenchmarkPG`）
+
 ## 5. 已知短板（诚实）
 
 | 短板 | 影响 | 缓解 |
