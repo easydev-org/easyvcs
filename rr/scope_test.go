@@ -167,3 +167,116 @@ func TestSequentialMergeNoRebase(t *testing.T) {
 		t.Fatalf("both changes must land: a=%q b=%q", string(ab), string(bb))
 	}
 }
+
+// TestMergeAfterTargetMovesHeavily pins the "base is pinned, target is dynamic"
+// contract: an RR opened against an OLD target tip still merges correctly after
+// the target has moved a lot — additions/deletions on the target are preserved,
+// non-overlapping edits to the same file combine, and ONLY a genuine overlap
+// conflicts.
+func TestMergeAfterTargetMovesHeavily(t *testing.T) {
+	cs, repo := newStore(t)
+	ws := revision.NewWorkspace(repo)
+	svc := New(cs, repo)
+	mk := func(parent object.ID, files map[string]string, msg string) *store.Revision {
+		var ch []revision.FileChangeSpec
+		for p, c := range files {
+			ch = append(ch, revision.FileChangeSpec{Path: p, Content: []byte(c)})
+		}
+		_, r, err := ws.CommitFromChanges(parent, ch, msg, store.Author{Name: "t"}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	base := mk(object.ID{}, map[string]string{"a.txt": "1\n2\n3\n4\n5\n", "b.txt": "b\n"}, "base")
+	_, _ = ws.SetRef("main", store.RefBranch, base.ID)
+
+	// feature: edit a.txt line 5, add d.txt.
+	feat := mk(base.Hash, map[string]string{"a.txt": "1\n2\n3\n4\n5 FEATURE\n", "d.txt": "D\n"}, "feat")
+	rrReq, err := svc.Create(Source{Snapshot: feat.Hash}, "main", "feat", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// main moves a LOT: edit a.txt line 1 (disjoint), rework b.txt, add e.txt, delete b? no — add c.
+	// Apply the main edits one commit at a time off the running tip.
+	tip := base
+	tip = mk(tip.Hash, map[string]string{"a.txt": "1 MAIN\n2\n3\n4\n5\n", "b.txt": "b\n", "c.txt": "C\n"}, "main: line1 + c")
+	tip = mk(tip.Hash, map[string]string{"b.txt": "B REWORKED\n"}, "main: rework b")
+	tip = mk(tip.Hash, map[string]string{"e.txt": "E\n"}, "main: add e")
+	_, _ = ws.SetRef("main", store.RefBranch, tip.ID)
+
+	res, err := svc.ApplyMerge(rrReq, testAuthor(), testUserID())
+	if err != nil || !res.Clean {
+		t.Fatalf("merge should be clean: err=%v clean=%v conflicts=%v", err, res.Clean, res.Conflicts)
+	}
+	ref, _ := ws.GetRef("main")
+	rev, _ := repo.GetRevision(ref.Target)
+	snap, _ := repo.GetSnapshot(rev.Hash)
+	root := ws.MustTree(snap.TreeID)
+	// main's additions survive.
+	for _, f := range []string{"c.txt", "e.txt", "d.txt"} {
+		if _, err := ws.FindEntry(root, f); err != nil {
+			t.Fatalf("%s should survive the merge", f)
+		}
+	}
+	// a.txt combines BOTH sides (main line1 + feature line5).
+	ae, _ := ws.FindEntry(root, "a.txt")
+	ab, _ := ws.ReadBlob(ae.ID)
+	if string(ab) != "1 MAIN\n2\n3\n4\n5 FEATURE\n" {
+		t.Fatalf("a.txt not line-merged: %q", string(ab))
+	}
+	// b.txt keeps main's rework.
+	be, _ := ws.FindEntry(root, "b.txt")
+	bb, _ := ws.ReadBlob(be.ID)
+	if string(bb) != "B REWORKED\n" {
+		t.Fatalf("b.txt rework lost: %q", string(bb))
+	}
+}
+
+// TestMergeFromOlderBaseDoesNotDeleteNewTargetFiles pins the anti-wipe property
+// for the "stale base" case: an RR whose source was branched from an OLDER
+// target tip (so it LACKS files the target later added) must NOT delete those
+// files — the merge base is the RR's recorded base, so the target's later
+// additions are additions, not deletions.
+func TestMergeFromOlderBaseDoesNotDeleteNewTargetFiles(t *testing.T) {
+	cs, repo := newStore(t)
+	ws := revision.NewWorkspace(repo)
+	svc := New(cs, repo)
+	mk := func(parent object.ID, files map[string]string, msg string) *store.Revision {
+		var ch []revision.FileChangeSpec
+		for p, c := range files {
+			ch = append(ch, revision.FileChangeSpec{Path: p, Content: []byte(c)})
+		}
+		_, r, err := ws.CommitFromChanges(parent, ch, msg, store.Author{Name: "t"}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	c1 := mk(object.ID{}, map[string]string{"a.txt": "A\n"}, "c1")
+	c2 := mk(c1.Hash, map[string]string{"b.txt": "B\n"}, "c2")
+	_, _ = ws.SetRef("main", store.RefBranch, c2.ID)
+
+	// Branch `old` from c2 (has a,b), then main adds c.txt.
+	// Create the RR from c2 itself (a valid snapshot with a,b).
+	rrReq, err := svc.Create(Source{Snapshot: c2.Hash}, "main", "propose old", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// main adds c.txt AFTER the RR was opened.
+	tip := mk(c2.Hash, map[string]string{"c.txt": "C\n"}, "main: add c")
+	_, _ = ws.SetRef("main", store.RefBranch, tip.ID)
+
+	res, err := svc.ApplyMerge(rrReq, testAuthor(), testUserID())
+	if err != nil || !res.Clean {
+		t.Fatalf("merge should be clean: %v %v", err, res.Clean)
+	}
+	ref, _ := ws.GetRef("main")
+	rev, _ := repo.GetRevision(ref.Target)
+	snap, _ := repo.GetSnapshot(rev.Hash)
+	root := ws.MustTree(snap.TreeID)
+	if _, err := ws.FindEntry(root, "c.txt"); err != nil {
+		t.Fatalf("c.txt (added on the target after the RR opened) was DELETED by the merge")
+	}
+}
