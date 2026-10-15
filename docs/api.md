@@ -332,7 +332,7 @@ no source revision, and no fork.
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/review` | propose | `{state: approved\|request_changes\|comment, body}` |
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/comment` | propose | `{body, path?}` |
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/resolve` | propose | `{path, side}` for a conflicted merge |
-| POST | `/api/v1/namespaces/{ns}/rr/{iid}/merge` | merge | always commits a new single-parent revision on the target |
+| POST | `/api/v1/namespaces/{ns}/rr/{iid}/merge` | merge | always commits a new single-parent revision on the target. `?allow_conflict=true` LANDS a conflicted merge (the target moves to a tree carrying conflict objects; the response includes `conflicts[]` and `clean:false`). Default: a conflicted merge stays **pending** and returns **409** `{error:"conflicted"}` so the client can resolve first |
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/close` | merge | close without merging (idempotent; a merged RR is refused) |
 
 ## Smart protocol (sync)

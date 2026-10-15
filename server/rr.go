@@ -440,10 +440,14 @@ func (s *Server) handleRRMerge(w http.ResponseWriter, r *http.Request) {
 	// Serialize pushes/merges per repo so the merge + ref move is atomic with
 	// respect to concurrent writers (no TOCTOU), matching handlePush.
 	tk := tokenFrom(r.Context())
+	// ?allow_conflict=true lands the merge even when it carries conflict objects
+	// (the target moves to a tree with conflict markers). Off by default: a
+	// conflicted merge stays pending until resolved.
+	opts := rr.MergeOptions{AllowConflict: r.URL.Query().Get("allow_conflict") == "true"}
 	var res rr.MergeResult
 	err = s.withRepoLock(repo, func() error {
 		var merr error
-		res, merr = svc.ApplyMerge(x, s.callerAuthor(tk), userID(tk))
+		res, merr = svc.ApplyMergeOpts(x, s.callerAuthor(tk), userID(tk), opts)
 		return merr
 	})
 	if err != nil {
@@ -455,7 +459,9 @@ func (s *Server) handleRRMerge(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if !res.Clean {
+	if !res.Clean && !opts.AllowConflict {
+		// The merge stayed PENDING (nothing landed on the target). 409 tells the
+		// client to resolve and retry.
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": "conflicted", "conflicts": res.Conflicts,
 			"message": "the request has conflicts; resolve them and merge again",
@@ -463,11 +469,18 @@ func (s *Server) handleRRMerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditOK(r, tk, fmt.Sprintf("rr-merge iid=%d", iid))
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"ok":              true,
+		"clean":           res.Clean,
 		"merged_snapshot": res.MergedSnapshot.String(), "merged_revision": res.MergedRevisionID,
 		"merged_by": userID(tk),
-	})
+	}
+	if len(res.Conflicts) > 0 {
+		// Landed WITH conflicts (allow_conflict): surface them so the client
+		// knows the tree carries conflict objects to resolve later.
+		out["conflicts"] = res.Conflicts
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleRRClose closes an RR without merging it (requireMerge: the same

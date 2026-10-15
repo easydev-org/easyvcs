@@ -341,28 +341,54 @@ func (s *Service) ComputeMerge(rr *store.RevisionRequest, merger store.Author) (
 	return res, nil
 }
 
-// ApplyMerge moves the target branch to the merge result. It is intended to run
-// under the server's per-repo lock. It first adopts an existing PENDING,
-// already-resolved merge snapshot (produced by Resolve) when one exists and is
-// conflict-free; otherwise it recomputes. On conflicts it records the pending
-// merge and marks the RR conflicted (the conflict objects stay in the tree;
-// nothing is rolled back).
+// MergeOptions tunes ApplyMerge.
+type MergeOptions struct {
+	// AllowConflict lands the merge even when it carries conflict objects: the
+	// target branch MOVES to a revision whose tree contains conflict objects
+	// (readable as marker text via /raw, /blob, archive). Off by default, so a
+	// conflicted merge stays pending (state=conflicted) until resolved — the
+	// safe default that never writes a half-merged tree onto the branch.
+	AllowConflict bool
+}
+
+// ApplyMerge is ApplyMergeOpts with the default options (conflicts stay pending).
 //
 // `merger` is the caller's identity (fallback author when the source snapshot has
 // none); `mergedBy` is the caller's user id, recorded as rr_merge.merged_by.
 func (s *Service) ApplyMerge(rr *store.RevisionRequest, merger store.Author, mergedBy *int64) (MergeResult, error) {
-	// Prefer a pending merge that Resolve has already made conflict-free.
+	return s.ApplyMergeOpts(rr, merger, mergedBy, MergeOptions{})
+}
+
+// ApplyMergeOpts moves the target branch to the merge result. It is intended to
+// run under the server's per-repo lock. It first adopts an existing PENDING
+// merge snapshot (produced by Resolve) when one exists: a conflict-free one
+// always, and a conflicted one only when AllowConflict is set (so a partially
+// resolved pending merge can be landed). Otherwise it recomputes.
+//
+// On conflicts it records the pending merge and marks the RR conflicted (the
+// conflict objects stay in the tree; nothing is rolled back) — UNLESS
+// AllowConflict is set, in which case the conflicted merge is landed on the
+// target and the RR marked merged.
+func (s *Service) ApplyMergeOpts(rr *store.RevisionRequest, merger store.Author, mergedBy *int64, opts MergeOptions) (MergeResult, error) {
+	// Adopt an existing pending merge when Resolve has produced one.
 	if res, ok, err := s.pendingMergeIfResolved(rr); err != nil {
 		return res, err
 	} else if ok {
 		return s.finishMerge(rr, res, mergedBy)
+	} else if opts.AllowConflict {
+		// A pending merge that still carries conflicts: land it as-is (this is
+		// the explicit "merge even with conflicts" path, and it respects any
+		// sides the caller already resolved).
+		if pm, perr := s.pendingMerge(rr); perr == nil && pm != nil {
+			return s.finishMerge(rr, *pm, mergedBy)
+		}
 	}
 
 	res, err := s.ComputeMerge(rr, merger)
 	if err != nil {
 		return res, err
 	}
-	if !res.Clean {
+	if !res.Clean && !opts.AllowConflict {
 		if err := s.cs.PutRRMerge(rr.ID, res.MergedSnapshot.String(), res.MergedRevisionID, "pending", mergedBy); err != nil {
 			return res, err
 		}
@@ -372,6 +398,31 @@ func (s *Service) ApplyMerge(rr *store.RevisionRequest, merger store.Author, mer
 		return res, nil
 	}
 	return s.finishMerge(rr, res, mergedBy)
+}
+
+// pendingMerge returns the pending merge revision's result (conflicted or not),
+// or nil when there is no pending merge.
+func (s *Service) pendingMerge(rr *store.RevisionRequest) (*MergeResult, error) {
+	pm, err := s.cs.GetRRMerge(rr.ID)
+	if err != nil || pm.State != "pending" || pm.MergedRevisionID == "" {
+		return nil, nil
+	}
+	rev, err := s.ws.GetRevision(pm.MergedRevisionID)
+	if err != nil {
+		return nil, nil
+	}
+	snap, err := s.ws.GetSnapshot(rev.Hash)
+	if err != nil {
+		return nil, nil
+	}
+	res := &MergeResult{Clean: true, MergedSnapshot: snap.RevisionHash, MergedRevisionID: rev.ID}
+	if atoms, aerr := s.ws.ConflictsInTree(snap.TreeID); aerr == nil {
+		for _, a := range atoms {
+			res.Conflicts = append(res.Conflicts, a.Path)
+		}
+		res.Clean = len(atoms) == 0
+	}
+	return res, nil
 }
 
 // finishMerge moves the target ref to the merge revision and records the RR as

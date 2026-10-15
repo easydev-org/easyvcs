@@ -526,3 +526,89 @@ func TestEmptyRepoRRSnapshotOnly(t *testing.T) {
 		t.Fatalf("merged content = %q", string(data))
 	}
 }
+
+// TestMergeAllowConflict lands a CONFLICTED merge onto the target when the
+// caller opts in (MergeOptions.AllowConflict): the branch moves to a tree whose
+// conflicted file is a first-class conflict object (readable as marker text),
+// and the RR is marked merged. The default (no opt-in) keeps it pending.
+func TestMergeAllowConflict(t *testing.T) {
+	cs, repo := newStore(t)
+	ws := revision.NewWorkspace(repo)
+
+	base := commitFiles(t, ws, nil, map[string]string{"f.txt": "base\n"}, "base")
+	if _, err := ws.SetRef("main", store.RefBranch, base.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	src := commitFiles(t, ws, []object.ID{base.RevisionHash}, map[string]string{"f.txt": "request-side\n"}, "request")
+	svc := New(cs, repo)
+	req, err := svc.Create(Source{Snapshot: src.RevisionHash}, "main", "conflict", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Advance main on the SAME file -> genuine conflict.
+	adv := commitFiles(t, ws, []object.ID{base.RevisionHash}, map[string]string{"f.txt": "main-side\n"}, "advance")
+	if _, err := ws.SetRef("main", store.RefBranch, adv.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Opt in: the conflicted merge lands on main.
+	res, err := svc.ApplyMergeOpts(req, testAuthor(), testUserID(), MergeOptions{AllowConflict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Clean {
+		t.Fatal("expected a conflicted (non-clean) result")
+	}
+	if len(res.Conflicts) != 1 || res.Conflicts[0] != "f.txt" {
+		t.Fatalf("expected conflict at f.txt, got %v", res.Conflicts)
+	}
+	// main MOVED to the merge revision and its tree carries a conflict object.
+	mainRef, _ := repo.GetRef("main")
+	if mainRef.Target != res.MergedRevisionID {
+		t.Fatalf("main did not move to the merge revision")
+	}
+	mergedRev, _ := repo.GetRevision(mainRef.Target)
+	mergedSnap, _ := repo.GetSnapshot(mergedRev.Hash)
+	entry, err := ws.FindEntry(ws.MustTree(mergedSnap.TreeID), "f.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Kind != object.KindConflict {
+		t.Fatalf("landed file kind = %v, want conflict", entry.Kind)
+	}
+	// The RR is marked merged.
+	got, _ := cs.GetRevisionRequest(repo.NamespaceID(), req.IID)
+	if got.State != store.RRMerged {
+		t.Fatalf("state = %s, want merged", got.State)
+	}
+}
+
+// TestMergeAllowConflictAdoptsPendingResolved: a merge that was conflicted (and
+// left pending) can be resolved on ONE file and then landed with AllowConflict,
+// carrying the remaining conflict.
+func TestMergeAllowConflictDefaultStaysPending(t *testing.T) {
+	cs, repo := newStore(t)
+	ws := revision.NewWorkspace(repo)
+	base := commitFiles(t, ws, nil, map[string]string{"f.txt": "base\n"}, "base")
+	if _, err := ws.SetRef("main", store.RefBranch, base.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	src := commitFiles(t, ws, []object.ID{base.RevisionHash}, map[string]string{"f.txt": "request-side\n"}, "request")
+	svc := New(cs, repo)
+	req, _ := svc.Create(Source{Snapshot: src.RevisionHash}, "main", "conflict", "", nil)
+	adv := commitFiles(t, ws, []object.ID{base.RevisionHash}, map[string]string{"f.txt": "main-side\n"}, "advance")
+	_, _ = ws.SetRef("main", store.RefBranch, adv.RevisionID)
+
+	// Default: conflicted merge stays pending; main does NOT move.
+	if _, err := svc.ApplyMerge(req, testAuthor(), testUserID()); err != nil {
+		t.Fatal(err)
+	}
+	mainRef, _ := repo.GetRef("main")
+	if mainRef.Target != adv.RevisionID {
+		t.Fatalf("default conflicted merge must NOT move main")
+	}
+	got, _ := cs.GetRevisionRequest(repo.NamespaceID(), req.IID)
+	if got.State != store.RRConflicted {
+		t.Fatalf("state = %s, want conflicted", got.State)
+	}
+}

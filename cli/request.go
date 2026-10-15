@@ -371,11 +371,27 @@ func cmdRequestMerge(c *ctx, args []string) {
 	if err != nil {
 		c.fatal("request merge:", err)
 	}
-	remote, rest := remoteOf(args)
-	if len(rest) < 1 {
-		c.fatal("usage: request merge <iid> [--remote origin]")
+	// --allow-conflict lands the merge even if it carries conflicts (the target
+	// moves to a tree with conflict markers). Off by default: a conflicted merge
+	// stays pending until resolved.
+	allow := false
+	var cleaned []string
+	for _, a := range args {
+		if a == "--allow-conflict" || a == "-allow-conflict" {
+			allow = true
+			continue
+		}
+		cleaned = append(cleaned, a)
 	}
-	resp, err := requestPost(repo, remote, "/rr/"+rest[0]+"/merge", map[string]any{})
+	remote, rest := remoteOf(cleaned)
+	if len(rest) < 1 {
+		c.fatal("usage: request merge <iid> [--allow-conflict] [--remote origin]")
+	}
+	path := "/rr/" + rest[0] + "/merge"
+	if allow {
+		path += "?allow_conflict=true"
+	}
+	resp, err := requestPost(repo, remote, path, map[string]any{})
 	if err != nil {
 		c.fatal("request merge:", err)
 	}
