@@ -131,3 +131,71 @@ func TestMergeOverlappingLinesConflict(t *testing.T) {
 		t.Fatalf("entry kind = %v, want conflict", e.Kind)
 	}
 }
+
+// Partial merge: non-overlapping regions auto-merge; ONLY the overlapping hunk
+// is marked. This is what a cloned/served conflicted file looks like.
+func TestPartialMergeMarked(t *testing.T) {
+	base := []string{"a", "b", "c", "d", "e", "f"}
+	ours := []string{"a", "b", "OURS", "d", "e", "f"}     // change line 3
+	theirs := []string{"a", "b", "THEIRS", "d", "e", "F"} // change line 3 (conflict) + line 6 (clean)
+	lines, conflicted := lineMerge3Marked(base, ours, theirs)
+	if !conflicted {
+		t.Fatal("expected a conflict block")
+	}
+	got := strings.Join(lines, "\n")
+	want := "a\nb\n<<<<<<< conflict (ours)\nOURS\n%%%%%%% base\nc\n%%%%%%% side #1 (theirs)\nTHEIRS\n>>>>>>> conflict ends\nd\ne\nF"
+	if got != want {
+		t.Fatalf("partial merge output mismatch.\n got: %q\nwant: %q", got, want)
+	}
+	// The conflicting line 3 must be inside a marker block.
+	if !strings.Contains(got, "<<<<<<< conflict") || !strings.Contains(got, "OURS") || !strings.Contains(got, "THEIRS") {
+		t.Fatalf("overlapping hunk not marked:\n%s", got)
+	}
+	// Lines a,b,d,e (unchanged/clean) appear OUTSIDE the marker.
+	idx := strings.Index(got, "<<<<<<< conflict")
+	if idx < 0 || !strings.Contains(got[:idx], "a\nb") {
+		t.Fatalf("clean prefix not before the marker:\n%s", got)
+	}
+}
+
+// End to end: a conflicted file renders as a PARTIAL merge (clean regions merged,
+// only the overlapping lines marked).
+func TestRenderConflictPartialMerge(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ws := NewWorkspace(repo)
+	mk := func(parent object.ID, content, msg string) *store.Revision {
+		_, r, err := ws.CommitFromChanges(parent, []FileChangeSpec{{Path: "f.txt", Content: []byte(content)}}, msg, store.Author{Name: "t"}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	base := mk(object.ID{}, "1\n2\n3\n4\n5\n", "base")
+	ours := mk(base.Hash, "1\n2\nOURS\n4\n5\n", "ours")       // conflict at line 3
+	theirs := mk(base.Hash, "1\n2\nTHEIRS\n4\n5\n", "theirs") // conflict at line 3
+	bs, _ := ws.GetSnapshot(base.Hash)
+	os1, _ := ws.GetSnapshot(ours.Hash)
+	ts, _ := ws.GetSnapshot(theirs.Hash)
+	m, atoms, err := ws.Merge(bs.TreeID, os1.TreeID, ts.TreeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(atoms) != 1 {
+		t.Fatalf("expected a conflict, got %v", atoms)
+	}
+	mt := ws.MustTree(m)
+	txt, err := ws.RenderConflict(mt.Entries["f.txt"].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The clean lines 1,2,4,5 are present outside the marker block.
+	if !strings.HasPrefix(txt, "1\n2\n") {
+		t.Fatalf("clean prefix missing:\n%s", txt)
+	}
+	if !strings.Contains(txt, "4\n5") {
+		t.Fatalf("clean suffix missing:\n%s", txt)
+	}
+	if !strings.Contains(txt, "<<<<<<< conflict") || !strings.Contains(txt, "OURS") || !strings.Contains(txt, "THEIRS") {
+		t.Fatalf("overlapping hunk not marked:\n%s", txt)
+	}
+}

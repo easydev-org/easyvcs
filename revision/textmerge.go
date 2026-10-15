@@ -151,3 +151,144 @@ func mergeFileText(base, ours, theirs []byte) ([]byte, bool) {
 	}
 	return []byte(strings.Join(merged, "\n") + "\n"), true
 }
+
+// lineMerge3Marked is like lineMerge3 but NEVER bails on overlap: non-overlapping
+// regions are auto-merged and each OVERLAPPING region becomes a marker block
+// (git/diff3 style), so the rendered file is mostly merged with only the
+// genuinely conflicting hunks marked. It returns the output lines and whether
+// any conflict block was emitted.
+func lineMerge3Marked(base, ours, theirs []string) ([]string, bool) {
+	oEdits := sideEdits(base, ours)
+	tEdits := sideEdits(base, theirs)
+	if len(oEdits) == 0 {
+		return theirs, false
+	}
+	if len(tEdits) == 0 {
+		return ours, false
+	}
+
+	var out []string
+	conflicted := false
+	oi, ti, pos := 0, 0, 0
+	copyBase := func(to int) {
+		for pos < to && pos < len(base) {
+			out = append(out, base[pos])
+			pos++
+		}
+	}
+	for oi < len(oEdits) || ti < len(tEdits) {
+		oStart := int(1) << 30
+		if oi < len(oEdits) {
+			oStart = oEdits[oi].start
+		}
+		tStart := 1 << 30
+		if ti < len(tEdits) {
+			tStart = tEdits[ti].start
+		}
+		if oStart < tStart {
+			copyBase(oStart)
+			oe := oEdits[oi]
+			if ti < len(tEdits) && rangesOverlap(oe.start, oe.end, tEdits[ti].start, tEdits[ti].end) {
+				block, nOI, nTI, end := conflictBlock(base, oEdits, tEdits, oi, ti)
+				out = append(out, block...)
+				oi, ti, pos = nOI, nTI, end
+				conflicted = true
+				continue
+			}
+			out = append(out, oe.lines...)
+			pos = oe.end
+			oi++
+		} else if ti < len(tEdits) {
+			copyBase(tStart)
+			te := tEdits[ti]
+			if oi < len(oEdits) && rangesOverlap(te.start, te.end, oEdits[oi].start, oEdits[oi].end) {
+				block, nOI, nTI, end := conflictBlock(base, oEdits, tEdits, oi, ti)
+				out = append(out, block...)
+				oi, ti, pos = nOI, nTI, end
+				conflicted = true
+				continue
+			}
+			out = append(out, te.lines...)
+			pos = te.end
+			ti++
+		}
+	}
+	copyBase(len(base))
+	return out, conflicted
+}
+
+// conflictBlock absorbs every edit from either side that overlaps the region
+// starting at (oEdits[oi], tEdits[ti]) and emits a marker block containing each
+// side's content for that base range plus the base itself.
+func conflictBlock(base []string, oEdits, tEdits []sideEdit, oi, ti int) (block []string, nextOI, nextTI, end int) {
+	start := min(oEdits[oi].start, tEdits[ti].start)
+	end = max(oEdits[oi].end, tEdits[ti].end)
+	// Absorb further overlapping edits from both sides.
+	for {
+		changed := false
+		for oi < len(oEdits) && oEdits[oi].start < end {
+			end = max(end, oEdits[oi].end)
+			oi++
+			changed = true
+		}
+		for ti < len(tEdits) && tEdits[ti].start < end {
+			end = max(end, tEdits[ti].end)
+			ti++
+			changed = true
+		}
+		if !changed {
+			break
+		}
+	}
+	oursTxt := applyEdits(base, oEdits, start, end)
+	theirsTxt := applyEdits(base, tEdits, start, end)
+	block = append(block, "<<<<<<< conflict (ours)")
+	block = append(block, oursTxt...)
+	block = append(block, "%%%%%%% base")
+	for i := start; i < end && i < len(base); i++ {
+		block = append(block, base[i])
+	}
+	block = append(block, "%%%%%%% side #1 (theirs)")
+	block = append(block, theirsTxt...)
+	block = append(block, ">>>>>>> conflict ends")
+	return block, oi, ti, end
+}
+
+// applyEdits returns one side's content for the base range [start,end): base
+// lines with that side's edits inside the range applied (deleted lines removed,
+// inserted lines spliced in).
+func applyEdits(base []string, edits []sideEdit, start, end int) []string {
+	var out []string
+	pos := start
+	for _, e := range edits {
+		if e.end <= start || e.start >= end {
+			continue
+		}
+		lo := max(e.start, start)
+		for pos < lo && pos < end {
+			out = append(out, base[pos])
+			pos++
+		}
+		out = append(out, e.lines...)
+		pos = max(pos, e.end)
+	}
+	for pos < end && pos < len(base) {
+		out = append(out, base[pos])
+		pos++
+	}
+	return out
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

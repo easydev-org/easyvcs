@@ -72,6 +72,13 @@ func (w *Workspace) renderConflict(conflictID object.ID) (string, error) {
 		return "", fmt.Errorf("object %s is not a conflict", conflictID)
 	}
 	c := o.Conflict
+	// Partial (hunk-level) merge for the common 3-way TEXT conflict
+	// [-base,+ours,+theirs]: auto-merge the non-overlapping regions and mark ONLY
+	// the overlapping hunks, so the file is mostly merged. Other shapes (nested,
+	// dir/file, binary, more terms) fall back to the whole-term marker format.
+	if txt, ok := w.partialMerge3Text(c); ok {
+		return txt, nil
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "<<<<<<< conflict (%d terms)\n", c.Numeric())
 	if len(c.Adds) > 0 {
@@ -103,6 +110,52 @@ func (w *Workspace) renderConflict(conflictID object.ID) (string, error) {
 	}
 	b.WriteString(">>>>>>> conflict ends\n")
 	return b.String(), nil
+}
+
+// partialMerge3Text renders a standard 3-way text conflict by merging the
+// non-overlapping regions and marking only the overlapping ones. ok is false
+// when the conflict is not the plain [-base,+ours,+theirs] shape over text
+// blobs (the caller then uses the whole-term marker format).
+func (w *Workspace) partialMerge3Text(c *object.Conflict) (string, bool) {
+	if len(c.Removes) != 1 || len(c.Adds) != 2 {
+		return "", false
+	}
+	baseID, oursID, theirsID := c.Removes[0].ID, c.Adds[0].ID, c.Adds[1].ID
+	base, err := w.blobBytes(baseID)
+	if err != nil {
+		return "", false
+	}
+	ours, err := w.blobBytes(oursID)
+	if err != nil {
+		return "", false
+	}
+	theirs, err := w.blobBytes(theirsID)
+	if err != nil {
+		return "", false
+	}
+	if IsBinary(base) || IsBinary(ours) || IsBinary(theirs) {
+		return "", false
+	}
+	lines, _ := lineMerge3Marked(splitLines(base), splitLines(ours), splitLines(theirs))
+	if len(lines) == 0 {
+		return "", true
+	}
+	return strings.Join(lines, "\n") + "\n", true
+}
+
+// blobBytes reads a blob's raw bytes (any kind error => error).
+func (w *Workspace) blobBytes(id object.ID) ([]byte, error) {
+	if id == (object.ID{}) {
+		return nil, nil
+	}
+	o, err := w.store.ReadObject(id)
+	if err != nil {
+		return nil, err
+	}
+	if o.Kind != object.KindBlob {
+		return nil, fmt.Errorf("object %s is not a blob", id)
+	}
+	return o.Blob, nil
 }
 
 // blobText returns text content of a blob, or "" for the absent id.
