@@ -52,6 +52,7 @@ Revisions:
 Maintenance:
   gc [--dry-run]            prune unreferenced objects (whole store)
   verify                   check object/snapshot consistency
+  daemon                    run a local daemon (unix socket) over this store
 
 References:
   branch <name> <revision> [DIR]  derive a mutable branch -> independent revision
@@ -229,6 +230,11 @@ func main() {
 	case "-h", "-help", "--help", "help":
 		fmt.Print(usage)
 		os.Exit(0)
+	}
+
+	if cmd == "daemon" {
+		cmdDaemon(&ctx{})
+		return
 	}
 
 	// Open the store lazily. A READ-ONLY command (log/show/refs/diff/verify/…)

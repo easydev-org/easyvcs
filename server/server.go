@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/easylab-platform/easyvcs/syncproto"
 	"io"
 	"log"
 	"net/http"
@@ -40,30 +41,12 @@ import (
 )
 
 // AdvertiseReq/Resp mirror the CLI's smart protocol request/response.
-type AdvertiseReq struct {
-	Have        []string `json:"have"`
-	HaveObjects []string `json:"have_objects"`
-	WantChanges []string `json:"want_changes,omitempty"`
-}
 
-type AdvertiseResp struct {
-	Repo    string       `json:"repo"`
-	Changes []string     `json:"changes"`
-	Refs    []*store.Ref `json:"refs"`
-	// ChangeHashes maps each advertised revision id to its CURRENT snapshot
-	// hash (hex). A push client uses it to decide which revisions the server
-	// already holds *at the same content*: because rewriting (rebase / amend /
-	// squash) keeps the revision id stable and changes only the snapshot, an
-	// id-only comparison would wrongly skip a rewritten revision and silently
-	// drop its new snapshot. Omitted (nil) by older servers, in which case a
-	// client falls back to id-only skipping.
-	ChangeHashes map[string]string `json:"change_hashes,omitempty"`
-	// ObjectBloom is a base64 Bloom filter of every object id the server holds.
-	// A pushing client uses it to SKIP objects the server already has (object-
-	// level delta) without a full id list. Absent (empty) => the client sends
-	// everything (older servers, or a store with no objects yet).
-	ObjectBloom string `json:"object_bloom,omitempty"`
-}
+// AdvertiseReq/AdvertiseResp are the shared sync wire types.
+type (
+	AdvertiseReq  = syncproto.AdvertiseReq
+	AdvertiseResp = syncproto.AdvertiseResp
+)
 
 // AuditSink receives an AuditEvent for access attempts. The default sink writes
 // to the store's append-only audit_log table; tests can supply a mock.
@@ -74,8 +57,11 @@ type AuditSink interface {
 // Server is the VCS protocol handler. It resolves bearer tokens against the
 // central store on every request and enforces repository/branch ACLs.
 type Server struct {
-	cs    *store.CentralStore
-	audit AuditSink
+	// advCache memoizes advertise responses per namespace for a short TTL
+	// (invalidated on every write). Set in New.
+	advCache *advertiseCache
+	cs       *store.CentralStore
+	audit    AuditSink
 	// repoLocks is the per-repository write lock. On SQLite it is an
 	// in-process map of mutexes (single instance); on Postgres it is a
 	// cross-replica advisory lock so two server instances serialise writes to
@@ -92,10 +78,27 @@ const DefaultMaxBody = 512 << 20
 // store-backed sink is used (writing audit_log). The tokens parameter is gone:
 // tokens are resolved via store.LookupToken on each request.
 func New(cs *store.CentralStore, sink AuditSink) *Server {
+	// Default: NO advertise cache. A process-local cache only sees writes that
+	// go through THIS server; a direct-store write or another replica's write
+	// would leave it stale, so the library default is the safe (uncached) path.
+	// The server executable opts in via WithAdvertiseTTL.
+	return newServer(cs, sink, 0)
+}
+
+// WithAdvertiseTTL enables the advertise cache with the given TTL (0 = off).
+// Safe when every write to the store goes through this server instance (single
+// writer); under multiple replicas, keep it 0 or accept up-to-TTL staleness.
+func (s *Server) WithAdvertiseTTL(ttl time.Duration) *Server {
+	s.advCache = newAdvertiseCache(ttl)
+	return s
+}
+
+// newServer is New with an explicit advertise-cache TTL (0 disables it).
+func newServer(cs *store.CentralStore, sink AuditSink, advTTL time.Duration) *Server {
 	if sink == nil {
 		sink = &storeAuditSink{cs: cs}
 	}
-	return &Server{cs: cs, audit: sink, repoLocks: newRepoLocker(cs), maxBody: DefaultMaxBody}
+	return &Server{cs: cs, audit: sink, repoLocks: newRepoLocker(cs), maxBody: DefaultMaxBody, advCache: newAdvertiseCache(advTTL)}
 }
 
 // SetMaxBody overrides the request body limit (bytes). Values <= 0 restore the
@@ -393,6 +396,10 @@ func (s *Server) handleAdvertise(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if cached, ok := s.advCache.get(repo.NamespaceID()); ok {
+		writeJSON(w, http.StatusOK, cached)
+		return
+	}
 	changes, err := repo.ListRevisions()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -414,7 +421,9 @@ func (s *Server) handleAdvertise(w http.ResponseWriter, r *http.Request) {
 	if bloom != nil {
 		bloomEnc = bloom.Encode()
 	}
-	writeJSON(w, http.StatusOK, AdvertiseResp{Repo: repo.String(), Changes: ids, Refs: refs, ChangeHashes: hashes, ObjectBloom: bloomEnc})
+	resp := AdvertiseResp{Repo: repo.String(), Changes: ids, Refs: refs, ChangeHashes: hashes, ObjectBloom: bloomEnc}
+	s.advCache.put(repo.NamespaceID(), resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
@@ -576,6 +585,9 @@ func (s *Server) withRepoLock(repo *store.Repo, fn func() error) error {
 		return err
 	}
 	defer unlock()
+	// Every write goes through here, so a namespace's cached advertise is always
+	// dropped after a write (no stale refs after the caller's own push).
+	defer s.advCache.invalidate(repo.NamespaceID())
 	return fn()
 }
 

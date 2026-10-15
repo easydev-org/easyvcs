@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/easylab-platform/easyvcs/syncproto"
 	"io"
 	"net/http"
 	"os"
@@ -18,28 +19,10 @@ import (
 	"github.com/easylab-platform/easyvcs/transfer"
 )
 
-// advertiseReq/Resp mirrors the server's smart protocol request/response.
-type advertiseReq struct {
-	Have        []string `json:"have"`
-	HaveObjects []string `json:"have_objects"`
-	WantChanges []string `json:"want_changes,omitempty"`
-}
-
-type advertiseResp struct {
-	Repo    string       `json:"repo"`
-	Changes []string     `json:"changes"`
-	Refs    []*store.Ref `json:"refs"`
-	// ChangeHashes maps each advertised revision id to its current snapshot
-	// hash (hex). It lets the pusher distinguish "server has this revision at
-	// the same content" (safe to skip) from "server has the id but at an OLD
-	// snapshot" (a rewritten revision that must be re-sent). Omitted by older
-	// servers => fall back to id-only skipping.
-	ChangeHashes map[string]string `json:"change_hashes,omitempty"`
-	// ObjectBloom is a base64 Bloom filter of the server's object ids; used to
-	// skip objects the server already holds (object-level delta). Empty => no
-	// filter (send everything for the missing revisions).
-	ObjectBloom string `json:"object_bloom,omitempty"`
-}
+// advertiseReq/Resp are the SHARED sync wire types (syncproto), so the CLI and
+// the server define the contract once.
+type advertiseReq = syncproto.AdvertiseReq
+type advertiseResp = syncproto.AdvertiseResp
 
 // --- remote configuration ---
 
@@ -127,6 +110,18 @@ func remoteClient() *http.Client {
 	return &http.Client{Transport: &http.Transport{Protocols: protocols}}
 }
 
+// clientForURL returns the HTTP client to use for a remote base URL: a
+// `unix://` base (the local daemon) uses a socket dialer, everything else uses
+// the normal TCP/h2c client.
+func clientForURL(base string) *http.Client {
+	if base == "http://unix" || isDaemonURL(base) {
+		if cl, _, ok := daemonClient(); ok {
+			return cl
+		}
+	}
+	return remoteClient()
+}
+
 // maybeGzip compresses body when it is large enough to benefit. On any
 // compression failure the original body is sent uncompressed (a valid
 // fallback: the server accepts both), and the error is returned to the caller
@@ -165,7 +160,7 @@ func doPost(url string, body []byte, token string) ([]byte, error) {
 		req.Header.Set("Content-Encoding", "gzip")
 		req.ContentLength = int64(len(payload))
 	}
-	resp, err := remoteClient().Do(req)
+	resp, err := clientForURL(req.URL.Scheme + "://" + req.URL.Host).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +218,7 @@ func doPostCompressed(url string, body []byte, token string) ([]byte, error) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := remoteClient().Do(req)
+	resp, err := clientForURL(req.URL.Scheme + "://" + req.URL.Host).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +260,13 @@ func getBundle(data []byte) (*transfer.Bundle, error) {
 }
 
 func resolveRemote(repo *store.Repo, nameOrURL string) (*store.Remote, error) {
+	// A `unix://` URL targets the LOCAL daemon; normalize it to the daemon base
+	// so the sync helpers (which use remoteClient) reach the socket.
+	if isDaemonURL(nameOrURL) {
+		// The daemon is reached over its unix socket; "http://unix" is a sentinel
+		// host that clientForURL routes to the socket dialer.
+		return &store.Remote{Name: "daemon", URL: "http://unix"}, nil
+	}
 	if rem, err := repo.GetRemote(nameOrURL); err == nil {
 		return rem, nil
 	}

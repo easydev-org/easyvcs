@@ -58,7 +58,7 @@ func main() {
 		log.Fatal("enable WAL:", err)
 	}
 
-	srv := server.New(cs, nil)
+	srv := server.New(cs, nil).WithAdvertiseTTL(2 * time.Second)
 	if mb := envOr("EASYVCS_MAX_BODY", ""); mb != "" {
 		if n, err := strconv.ParseInt(mb, 10, 64); err == nil {
 			srv.SetMaxBody(n)

@@ -107,6 +107,7 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.advCache.invalidate(repo.NamespaceID())
 	writeJSON(w, http.StatusOK, refView(ref))
 }
 
@@ -125,6 +126,7 @@ func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
+	s.advCache.invalidate(repo.NamespaceID())
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "branch": branch, "path": scopePath(r)})
 }
 
@@ -184,5 +186,6 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err)
 		return
 	}
+	s.advCache.invalidate(repo.NamespaceID())
 	writeJSON(w, http.StatusOK, refView(ref))
 }

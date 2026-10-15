@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/easylab-platform/easyvcs/syncproto"
 	"net/http"
 	"strings"
 
@@ -14,30 +15,15 @@ import (
 
 // ---- commit (no working copy): apply a file-op set to a NON-default branch ----
 
-// commitFileOp is one file operation in a /commit request.
-type commitFileOp struct {
-	Path         string `json:"path"`
-	Operation    string `json:"operation"`     // create | update | delete (empty = update)
-	Content      string `json:"content"`       // UTF-8 text
-	ContentBytes string `json:"content_bytes"` // base64; wins over Content
-}
-
-// commitReq is the /commit request body. Its shape supports BOTH a fresh commit
-// and an AMEND:
-//
-//   - no revision_id  -> a NEW revision is created with parents = the branch tip
-//     (or a root revision when the branch does not exist);
-//   - with revision_id -> the named revision is AMENDED in place (same stable id,
-//     replaced snapshot). This is how a staging writer accumulates edits across
-//     several calls and then finalises them (reword) in one commit.
-type commitReq struct {
-	Branch     string         `json:"branch"`
-	Message    string         `json:"message"`
-	RevisionID string         `json:"revision_id"`
-	Author     *store.Author  `json:"author"`
-	Parents    []string       `json:"parents"`
-	Files      []commitFileOp `json:"files"`
-}
+// commitFileOp / commitReq / snapshotReq are the SHARED request-body types
+// (syncproto). commitReq supports BOTH a fresh commit and an AMEND: no
+// revision_id = a NEW revision on the branch tip; with revision_id = amend that
+// revision in place (same stable id, replaced snapshot).
+type (
+	commitFileOp = syncproto.FileOp
+	commitReq    = syncproto.CommitReq
+	snapshotReq  = syncproto.SnapshotReq
+)
 
 // handleCommitFiles applies a set of file operations to a NON-default branch
 // without a working copy: it builds the new tree from the branch tip (or the
@@ -278,12 +264,6 @@ func tipSnapshotHash(repo *store.Repo, revisionID string) (object.ID, error) {
 // produces a NEW revision + snapshot that NO ref points at. It is the
 // "propose" primitive: the caller then opens a Revision Request with the
 // returned snapshot as its source.
-type snapshotReq struct {
-	Message string         `json:"message"`
-	Author  *store.Author  `json:"author"`
-	Parents []string       `json:"parents"`
-	Files   []commitFileOp `json:"files"`
-}
 
 // handleSnapshot builds a revision + snapshot from a file-op set WITHOUT moving
 // any ref. It is the change-native way to "propose from a sandbox": a client
