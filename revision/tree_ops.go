@@ -72,6 +72,19 @@ func (w *Workspace) WriteBlob(data []byte) (object.ID, error) {
 // treeOps adapter satisfies merge.treeOps.
 
 // WriteConflict implements merge.treeOps.
+// ReadConflict implements merge.treeOps: it loads a conflict object so a nested
+// conflict can be flattened during a merge.
+func (w *Workspace) ReadConflict(id object.ID) (*object.Conflict, error) {
+	o, err := w.store.ReadObject(id)
+	if err != nil {
+		return nil, err
+	}
+	if o.Kind != object.KindConflict || o.Conflict == nil {
+		return nil, fmt.Errorf("object %s is not a conflict", id)
+	}
+	return o.Conflict, nil
+}
+
 func (w *Workspace) WriteConflict(c *object.Conflict) (object.ID, error) {
 	o := &object.Object{Kind: object.KindConflict, Conflict: c}
 	if err := w.store.WriteObject(o); err != nil {
@@ -225,6 +238,15 @@ func (w *Workspace) findEntry(t *object.Tree, path string) (object.Entry, error)
 }
 
 // resolvePath replaces the entry at path in a tree with a blob (or removes it).
+// kindOf reports the tree entry kind for an object id (blob by default). Used
+// when a resolve places an object that may be a whole subtree (a D/F conflict).
+func (w *Workspace) kindOf(id object.ID) object.Kind {
+	if o, err := w.store.ReadObject(id); err == nil && o.Kind == object.KindTree {
+		return object.KindTree
+	}
+	return object.KindBlob
+}
+
 func (w *Workspace) resolvePath(t *object.Tree, path string, chosen object.ID, remove bool) (object.ID, error) {
 	var components []string
 	cur := path
@@ -252,7 +274,10 @@ func (w *Workspace) resolvePath(t *object.Tree, path string, chosen object.ID, r
 			if remove {
 				delete(clone.Entries, name)
 			} else {
-				clone.Entries[name] = object.Entry{Name: name, Kind: object.KindBlob, ID: chosen}
+				// Place the chosen object with its TRUE kind: a directory/file
+				// conflict resolves to either a blob or a whole SUBTREE, so the
+				// entry kind must follow the object, not default to blob.
+				clone.Entries[name] = object.Entry{Name: name, Kind: w.kindOf(chosen), ID: chosen}
 			}
 			return clone, nil
 		}

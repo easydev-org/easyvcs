@@ -22,6 +22,9 @@ import (
 type treeOps interface {
 	ReadBlob(id object.ID) ([]byte, error)
 	ReadTree(id object.ID) (*object.Tree, error)
+	// ReadConflict loads a conflict object (so a nested conflict can be FLATTENED
+	// into an N-way one instead of being treated as an opaque blob).
+	ReadConflict(id object.ID) (*object.Conflict, error)
 	WriteBlob(data []byte) (object.ID, error)
 	WriteTree(t *object.Tree) (object.ID, error)
 	WriteConflict(c *object.Conflict) (object.ID, error)
@@ -231,6 +234,18 @@ func present(e object.Entry) bool { return e.ID != (object.ID{}) }
 func isTree(e object.Entry) bool { return e.Kind == object.KindTree }
 
 func mergeEntry(name string, base, ours, theirs object.Entry, ops treeOps) (*object.Entry, []ConflictAtom, error) {
+	// Directory/file (D/F) conflict: one side made this path a DIRECTORY while
+	// the other kept it a FILE (both present). This is NOT a tree merge — doing
+	// so would silently DROP the file side. Emit a conflict carrying both the
+	// tree and the blob as terms, so the user chooses which shape wins.
+	oursDir := ours.Kind == object.KindTree
+	theirsDir := theirs.Kind == object.KindTree
+	oursFile := present(ours) && !oursDir
+	theirsFile := present(theirs) && !theirsDir
+	if (oursDir && theirsFile) || (oursFile && theirsDir) {
+		return dfConflict(name, base, ours, theirs, ops)
+	}
+
 	baseTree, baseIsTree := entryAsTree(base, ops)
 	oursTree, oursIsTree := entryAsTree(ours, ops)
 	theirsTree, theirsIsTree := entryAsTree(theirs, ops)
@@ -324,14 +339,28 @@ func mergeEntry(name string, base, ours, theirs object.Entry, ops treeOps) (*obj
 	// Otherwise this is a genuine conflict (N-way). Build a conflict object
 	// whose removes = base (if any) and adds = the present ours/theirs terms
 	// (if present). Deletion is represented by an absent term.
+	//
+	// A side that is ITSELF a conflict is FLATTENED: its terms are spliced in
+	// rather than treating the nested conflict object as an opaque blob, so a
+	// conflict-of-conflict becomes a single N-way conflict (e.g. C1=[-base,
+	// +ours,+theirs] merged with theirs2 => [-base,+ours,+theirs,+theirs2]).
 	c := &object.Conflict{Removes: []object.Term{}, Adds: []object.Term{}}
-	if baseP {
+	if br, ba, ok := conflictTerms(base, ops); ok {
+		c.Removes = append(c.Removes, br...)
+		c.Adds = append(c.Adds, ba...)
+	} else if baseP {
 		c.Removes = append(c.Removes, object.Term{ID: bv, Label: "base"})
 	}
-	if oursP {
+	if or_, oa, ok := conflictTerms(ours, ops); ok {
+		c.Removes = append(c.Removes, or_...)
+		c.Adds = append(c.Adds, oa...)
+	} else if oursP {
 		c.Adds = append(c.Adds, object.Term{ID: ov, Label: "ours"})
 	}
-	if theirsP {
+	if tr, ta, ok := conflictTerms(theirs, ops); ok {
+		c.Removes = append(c.Removes, tr...)
+		c.Adds = append(c.Adds, ta...)
+	} else if theirsP {
 		c.Adds = append(c.Adds, object.Term{ID: tv, Label: "theirs"})
 	}
 	// Absent side needs an explicit term so resolve can produce a deletion. If a
@@ -345,12 +374,75 @@ func mergeEntry(name string, base, ours, theirs object.Entry, ops treeOps) (*obj
 	if !theirsP && oursP {
 		c.Adds = append(c.Adds, object.Term{ID: absent, Label: "theirs"})
 	}
+	// Deduplicate: a flattened nested conflict can repeat the base (C1 already
+	// carries the outer base) and, when the same content appears on two sides,
+	// the adds. Keep first-seen order.
+	c.Removes = dedupeTerms(c.Removes, true)
+	c.Adds = dedupeTerms(c.Adds, false)
 	// Recompute id after adding absent-side terms.
 	conflictID, err := ops.WriteConflict(c)
 	if err != nil {
 		return nil, nil, err
 	}
 	return &object.Entry{Name: name, Kind: object.KindConflict, ID: conflictID}, []ConflictAtom{{Path: name, ID: conflictID}}, nil
+}
+
+// dfConflict builds a directory/file conflict: the terms are the whole entries
+// (a tree id and a blob id, or two trees vs a blob), so a resolver can pick a
+// shape. Paths are empty (the conflict lives at `name`).
+func dfConflict(name string, base, ours, theirs object.Entry, ops treeOps) (*object.Entry, []ConflictAtom, error) {
+	c := &object.Conflict{Removes: []object.Term{}, Adds: []object.Term{}}
+	if present(base) {
+		c.Removes = append(c.Removes, object.Term{ID: base.ID, Label: "base"})
+	}
+	if present(ours) {
+		c.Adds = append(c.Adds, object.Term{ID: ours.ID, Label: "ours"})
+	}
+	if present(theirs) {
+		c.Adds = append(c.Adds, object.Term{ID: theirs.ID, Label: "theirs"})
+	}
+	c.Removes = dedupeTerms(c.Removes, true)
+	c.Adds = dedupeTerms(c.Adds, false)
+	cid, err := ops.WriteConflict(c)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &object.Entry{Name: name, Kind: object.KindConflict, ID: cid}, []ConflictAtom{{Path: name, ID: cid}}, nil
+}
+
+// dedupeTerms removes duplicate terms, keeping first-seen order. Removes are
+// deduped by ID alone (the base is the same regardless of label); adds by
+// (ID, label) so two genuinely different sides that happen to share content are
+// both kept.
+func dedupeTerms(terms []object.Term, byIDOnly bool) []object.Term {
+	seen := map[string]bool{}
+	out := terms[:0]
+	for _, t := range terms {
+		key := t.ID.String()
+		if !byIDOnly {
+			key += "\x00" + t.Label
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, t)
+	}
+	return out
+}
+
+// conflictTerms returns the flattened terms of an entry that is a conflict
+// object. ok is false for a plain blob/tree/absent entry (the caller then uses
+// the entry's own id as a single term).
+func conflictTerms(e object.Entry, ops treeOps) (removes, adds []object.Term, ok bool) {
+	if e.Kind != object.KindConflict || !present(e) {
+		return nil, nil, false
+	}
+	c, err := ops.ReadConflict(e.ID)
+	if err != nil || c == nil {
+		return nil, nil, false
+	}
+	return c.Removes, c.Adds, true
 }
 
 func joinPath(parent, child string) string {

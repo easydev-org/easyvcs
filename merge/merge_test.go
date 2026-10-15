@@ -37,6 +37,9 @@ func (f *fakeTreeOps) WriteTree(t *object.Tree) (object.ID, error) {
 func (f *fakeTreeOps) WriteConflict(c *object.Conflict) (object.ID, error) {
 	return object.BlobID([]byte("conflict")), nil
 }
+func (f *fakeTreeOps) ReadConflict(id object.ID) (*object.Conflict, error) {
+	return nil, fmt.Errorf("no conflicts in fakeTreeOps")
+}
 
 func blobEntry(name string, data []byte) object.Entry {
 	return object.Entry{Name: name, Kind: object.KindBlob, ID: object.BlobID(data)}

@@ -114,8 +114,30 @@ func (w *Workspace) blobText(id object.ID) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if o.Kind != object.KindBlob {
-		return "", fmt.Errorf("object %s is not a blob", id)
+	switch o.Kind {
+	case object.KindBlob:
+		// A binary blob cannot be shown as text; emit a short placeholder rather
+		// than raw NUL bytes (which would corrupt the marker stream).
+		if IsBinary(o.Blob) {
+			return fmt.Sprintf("<<binary blob %s, %d bytes>>", id.String()[:12], len(o.Blob)), nil
+		}
+		return string(o.Blob), nil
+	case object.KindConflict:
+		// A NESTED conflict (a term that is itself a conflict): render it
+		// recursively so the marker text stays complete.
+		return w.renderConflict(id)
+	case object.KindTree:
+		// A directory/file conflict term: show the directory's file listing.
+		t, err := w.ReadTree(id)
+		if err != nil {
+			return "", err
+		}
+		names := make([]string, 0, len(t.Entries))
+		for _, e := range t.SortedEntries() {
+			names = append(names, e.Name)
+		}
+		return fmt.Sprintf("<<directory with %d entries: %s>>", len(names), strings.Join(names, ", ")), nil
+	default:
+		return "", fmt.Errorf("object %s is not a blob or conflict", id)
 	}
-	return string(o.Blob), nil
 }
