@@ -128,3 +128,42 @@ func TestBinaryConflictRendersPlaceholder(t *testing.T) {
 	}
 	_ = repo
 }
+
+// ResolveToContent writes custom merged bytes (the binary escape hatch) and
+// clears the conflict.
+func TestResolveToContent(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ws := NewWorkspace(repo)
+	bin := func(s byte) []byte { return []byte{0, 1, 2, s, 0xff} }
+	base := ckCommit(t, ws, object.ID{}, []FileChangeSpec{{Path: "b.bin", Content: bin(1)}}, "base")
+	ours := ckCommit(t, ws, base.Hash, []FileChangeSpec{{Path: "b.bin", Content: bin(2)}}, "ours")
+	theirs := ckCommit(t, ws, base.Hash, []FileChangeSpec{{Path: "b.bin", Content: bin(3)}}, "theirs")
+	bs, _ := ws.GetSnapshot(base.Hash)
+	os1, _ := ws.GetSnapshot(ours.Hash)
+	ts, _ := ws.GetSnapshot(theirs.Hash)
+	m, _, err := ws.Merge(bs.TreeID, os1.TreeID, ts.TreeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, cr, _ := ws.Commit(CommitParams{Parents: []object.ID{base.Hash}, TreeID: m, Description: "conflict"})
+
+	want := []byte{9, 9, 9, 9, 9}
+	ns, _, err := ws.ResolveToContent(cr.ID, "b.bin", want)
+	if err != nil {
+		t.Fatalf("ResolveToContent: %v", err)
+	}
+	snap, _ := ws.GetSnapshot(ns.RevisionHash)
+	root := ws.MustTree(snap.TreeID)
+	e := root.Entries["b.bin"]
+	if e.Kind != object.KindBlob {
+		t.Fatalf("after content-resolve kind = %v, want blob", e.Kind)
+	}
+	got, _ := ws.ReadBlob(e.ID)
+	if string(got) != string(want) {
+		t.Fatalf("resolved bytes = %v, want %v", got, want)
+	}
+	if rem, _ := ws.ConflictsInTree(snap.TreeID); len(rem) != 0 {
+		t.Fatalf("conflicts remain: %v", rem)
+	}
+	_ = repo
+}

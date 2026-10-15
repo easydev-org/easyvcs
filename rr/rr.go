@@ -482,7 +482,39 @@ func (s *Service) pendingMergeIfResolved(rr *store.RevisionRequest) (MergeResult
 //
 // `merger` is the caller's identity (fallback author when the source snapshot has
 // none); `mergedBy` is the caller's user id, recorded as rr_merge.merged_by.
+// Resolve resolves the conflict at `path` by picking one of the conflict's add
+// terms (side index).
 func (s *Service) Resolve(rr *store.RevisionRequest, path string, side int, merger store.Author, mergedBy *int64) (*store.RevisionRequest, error) {
+	return s.resolveWith(rr, path, merger, mergedBy, func(revID string) error {
+		_, _, err := s.ws.Resolve(revID, path, side)
+		return err
+	})
+}
+
+// ResolveToContent resolves the conflict at `path` by writing `content` as the
+// merged bytes — the escape hatch for a BINARY conflict, where picking a whole
+// side is the only structural option otherwise. Content is content-addressed,
+// so identical resolutions dedupe.
+func (s *Service) ResolveToContent(rr *store.RevisionRequest, path string, content []byte, merger store.Author, mergedBy *int64) (*store.RevisionRequest, error) {
+	return s.resolveWith(rr, path, merger, mergedBy, func(revID string) error {
+		_, _, err := s.ws.ResolveToContent(revID, path, content)
+		return err
+	})
+}
+
+// ResolveToPath resolves a RENAME conflict at `path` by choosing which side's
+// path wins (chosenPath must equal the Path of one of the conflict's add terms).
+func (s *Service) ResolveToPath(rr *store.RevisionRequest, path, chosenPath string, merger store.Author, mergedBy *int64) (*store.RevisionRequest, error) {
+	return s.resolveWith(rr, path, merger, mergedBy, func(revID string) error {
+		_, _, err := s.ws.ResolveToPath(revID, path, chosenPath)
+		return err
+	})
+}
+
+// resolveWith runs the shared resolve flow: ensure a pending conflicted merge,
+// verify `path` is conflicted, record the pending merge, apply `apply`, and flip
+// the RR back to open when no conflicts remain.
+func (s *Service) resolveWith(rr *store.RevisionRequest, path string, merger store.Author, mergedBy *int64, apply func(pendingRevID string) error) (*store.RevisionRequest, error) {
 	// Ensure a pending conflicted merge exists to resolve against.
 	res, err := s.ComputeMerge(rr, merger)
 	if err != nil {
@@ -509,8 +541,7 @@ func (s *Service) Resolve(rr *store.RevisionRequest, path string, side int, merg
 	if err := s.cs.PutRRMerge(rr.ID, res.MergedSnapshot.String(), pendingRev, "pending", mergedBy); err != nil {
 		return nil, err
 	}
-	// Genuinely resolve: rewrite the pending revision's tree with the chosen side.
-	if _, _, err := s.ws.Resolve(pendingRev, path, side); err != nil {
+	if err := apply(pendingRev); err != nil {
 		return nil, fmt.Errorf("rr: resolve %s: %w", path, err)
 	}
 	rev, err := s.ws.GetRevision(pendingRev)

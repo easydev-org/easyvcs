@@ -98,11 +98,13 @@ func cmdResolve(c *ctx) {
 		c.fatal("resolve:", err)
 	}
 	if len(os.Args) < 4 {
-		c.fatal("usage: resolve <revision> <path> [--side N]")
+		c.fatal("usage: resolve <revision> <path> [--side N | --content FILE | --choose-path PATH]")
 	}
 	revisionID := os.Args[2]
 	path := os.Args[3]
 	side := 0
+	contentFile := ""
+	choosePath := ""
 	for i := 4; i < len(os.Args); i++ {
 		switch os.Args[i] {
 		case "--side", "-side":
@@ -112,10 +114,34 @@ func cmdResolve(c *ctx) {
 				}
 				i++
 			}
+		case "--content", "-content":
+			if i+1 < len(os.Args) {
+				contentFile = os.Args[i+1]
+				i++
+			}
+		case "--choose-path", "-choose-path":
+			if i+1 < len(os.Args) {
+				choosePath = os.Args[i+1]
+				i++
+			}
 		}
 	}
 	ws := revision.NewWorkspace(repo)
-	ns, ch, err := ws.Resolve(revisionID, path, side)
+	var ns *store.Snapshot
+	var ch *store.Revision
+	switch {
+	case contentFile != "":
+		// Resolve by WRITING the merged bytes — the binary escape hatch.
+		data, rerr := os.ReadFile(contentFile)
+		if rerr != nil {
+			c.fatal("resolve: read content:", rerr)
+		}
+		ns, ch, err = ws.ResolveToContent(revisionID, path, data)
+	case choosePath != "":
+		ns, ch, err = ws.ResolveToPath(revisionID, path, choosePath)
+	default:
+		ns, ch, err = ws.Resolve(revisionID, path, side)
+	}
 	if err != nil {
 		c.fatal("resolve:", err)
 	}

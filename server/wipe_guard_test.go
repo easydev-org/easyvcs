@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"net/http"
 	"testing"
 )
@@ -150,4 +151,60 @@ func TestRRMergeAllowConflict(t *testing.T) {
 		t.Fatalf("allow_conflict merge = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	_ = repo
+}
+
+// TestRRResolveByContent resolves a BINARY conflict by writing the merged bytes
+// (base64 `content`), the escape hatch when picking a whole side is not enough.
+func TestRRResolveByContent(t *testing.T) {
+	_, mux, token, _ := hostingTestServer(t)
+	// Seed a binary file on a branch, then create a conflicting RR.
+	bin := func(s byte) string {
+		return base64.StdEncoding.EncodeToString([]byte{0x89, 'P', 'N', 'G', 0, 0, s, 0xff})
+	}
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+		"branch": "topic", "message": "seed",
+		"files": []map[string]any{{"path": "logo.png", "operation": "create", "content_bytes": bin(1)}},
+	}); rec.Code != 200 {
+		// branch "topic" may not exist yet -> create from main first.
+		if r2 := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", token,
+			map[string]any{"name": "topic", "from": "main"}); r2.Code != 200 {
+			t.Fatalf("branch: %d %s", r2.Code, r2.Body.String())
+		}
+		if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+			"branch": "topic", "message": "seed",
+			"files": []map[string]any{{"path": "logo.png", "operation": "create", "content_bytes": bin(1)}},
+		}); rec.Code != 200 {
+			t.Fatalf("seed commit: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	snap := snapshotPost(t, mux, token, map[string]any{
+		"message": "src", "files": []map[string]any{{"path": "logo.png", "operation": "update", "content_bytes": bin(2)}},
+	})
+	src := decode(t, snap)["snapshot"].(string)
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+		"branch": "topic", "message": "advance",
+		"files": []map[string]any{{"path": "logo.png", "operation": "update", "content_bytes": bin(3)}},
+	}); rec.Code != 200 {
+		t.Fatalf("advance: %d %s", rec.Code, rec.Body.String())
+	}
+	rr := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr", token, map[string]any{
+		"source_snapshot": src, "target_branch": "topic", "title": "binary conflict",
+	})
+	iid := int64(decode(t, rr)["iid"].(float64))
+	// Force the pending conflicted merge.
+	hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr/"+itoa(iid)+"/merge", token, nil)
+
+	// Resolve by writing custom bytes.
+	want := []byte{0x89, 'P', 'N', 'G', 9, 9, 9, 9}
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr/"+itoa(iid)+"/resolve", token, map[string]any{
+		"path": "logo.png", "content": base64.StdEncoding.EncodeToString(want),
+	})
+	if rec.Code != 200 {
+		t.Fatalf("resolve by content: %d %s", rec.Code, rec.Body.String())
+	}
+	// Merging again lands the resolved (custom-bytes) tree.
+	mr := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr/"+itoa(iid)+"/merge", token, nil)
+	if mr.Code != 200 {
+		t.Fatalf("merge after content-resolve: %d %s", mr.Code, mr.Body.String())
+	}
 }

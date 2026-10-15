@@ -46,7 +46,7 @@ Revisions:
   checkout <sha> [DIR]      set current_revision + materialize tree into dir
   rebase <revision> [--onto <parent>]...  repoint a revision onto one or more parents
   squash <revision> [DIR]     absorb a revision into its parent (parent id stable)
-  resolve <revision> <path> [--side N]  resolve a conflict to a chosen side
+  resolve <revision> <path> [--side N | --content FILE | --choose-path P]  resolve a conflict to a chosen side
   message <revision> <text>    rewrite a revision's commit message (id stable)
 
 Maintenance:

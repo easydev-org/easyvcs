@@ -331,9 +331,23 @@ no source revision, and no fork.
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/update` | propose | explicit re-pin (`{source_snapshot}`) |
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/review` | propose | `{state: approved\|request_changes\|comment, body}` |
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/comment` | propose | `{body, path?}` |
-| POST | `/api/v1/namespaces/{ns}/rr/{iid}/resolve` | propose | `{path, side}` for a conflicted merge |
+| POST | `/api/v1/namespaces/{ns}/rr/{iid}/resolve` | propose | `{path, side}` picks an add term; `{path, content}` (base64) writes custom MERGED bytes (the BINARY escape hatch); `{path, choose_path}` picks a rename side. See below |
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/merge` | merge | always commits a new single-parent revision on the target. `?allow_conflict=true` LANDS a conflicted merge (the target moves to a tree carrying conflict objects; the response includes `conflicts[]` and `clean:false`). Default: a conflicted merge stays **pending** and returns **409** `{error:"conflicted"}` so the client can resolve first |
 | POST | `/api/v1/namespaces/{ns}/rr/{iid}/close` | merge | close without merging (idempotent; a merged RR is refused) |
+
+### Resolving a conflict
+
+A conflicted merge (state `conflicted`) is resolved per path, then merged again:
+
+- `{path, side:N}` — pick the N-th add term (0-based). Works for text, binary and
+  dir/file conflicts (a whole side wins).
+- `{path, content:"<base64>"}` — WRITE the merged bytes directly. The escape
+  hatch for a **binary** conflict, where line-merging does not apply: merge the
+  bytes out-of-band (an image editor, a merge tool) and upload the result.
+- `{path, choose_path:"<other/path>"}` — for a **rename** conflict, choose which
+  side's path wins.
+
+When no conflicts remain the RR returns to `open` and can be merged.
 
 ## Smart protocol (sync)
 

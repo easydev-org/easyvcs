@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -393,7 +394,15 @@ func (s *Server) handleRRComment(w http.ResponseWriter, r *http.Request) {
 // rrResolveReq is the resolve body.
 type rrResolveReq struct {
 	Path string `json:"path"`
-	Side int    `json:"side"`
+	// Side selects one of the conflict's add terms (0-based). Ignored when
+	// Content or ChoosePath is set.
+	Side int `json:"side"`
+	// Content (base64) resolves by WRITING the merged bytes — the binary
+	// escape hatch. Wins over Side.
+	Content string `json:"content,omitempty"`
+	// ChoosePath resolves a RENAME conflict by choosing which side's path wins
+	// (must equal one of the conflict's term paths). Wins over Side.
+	ChoosePath string `json:"choose_path,omitempty"`
 }
 
 func (s *Server) handleRRResolve(w http.ResponseWriter, r *http.Request) {
@@ -415,7 +424,21 @@ func (s *Server) handleRRResolve(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	updated, err := svc.Resolve(x, req.Path, req.Side, s.callerAuthor(tokenFrom(r.Context())), userID(tokenFrom(r.Context())))
+	tk := tokenFrom(r.Context())
+	var updated *store.RevisionRequest
+	switch {
+	case req.Content != "":
+		content, derr := base64.StdEncoding.DecodeString(req.Content)
+		if derr != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid base64 content: %w", derr))
+			return
+		}
+		updated, err = svc.ResolveToContent(x, req.Path, content, s.callerAuthor(tk), userID(tk))
+	case req.ChoosePath != "":
+		updated, err = svc.ResolveToPath(x, req.Path, req.ChoosePath, s.callerAuthor(tk), userID(tk))
+	default:
+		updated, err = svc.Resolve(x, req.Path, req.Side, s.callerAuthor(tk), userID(tk))
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
