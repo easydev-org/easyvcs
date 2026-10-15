@@ -23,6 +23,12 @@ type CentralStore struct {
 	openMu    sync.Mutex
 	openKnown bool
 	openValue bool
+	// idxReady caches, per namespace, whether the revision_path_dirs index has
+	// ever been populated. Rows are only ever ADDED, so once a namespace has a
+	// row the lazy-backfill check is unnecessary; this avoids a COUNT on every
+	// RevisionsTouching call.
+	idxMu    sync.Mutex
+	idxReady map[int64]bool
 }
 
 // HomeDir returns the EasyVCS home directory (default ~/.easyvcs, overridable
@@ -127,3 +133,21 @@ func (s *CentralStore) ensureNamespaceRow(owner int64, name string) error {
 
 // Close closes the underlying database.
 func (s *CentralStore) Close() error { return s.d.db.Close() }
+
+// indexReady reports (with a process-local cache) whether the path index for a
+// namespace has been checked/populated.
+func (s *CentralStore) indexReady(namespaceID int64) bool {
+	s.idxMu.Lock()
+	defer s.idxMu.Unlock()
+	return s.idxReady[namespaceID]
+}
+
+// markIndexReady records that a namespace's path index is present.
+func (s *CentralStore) markIndexReady(namespaceID int64) {
+	s.idxMu.Lock()
+	defer s.idxMu.Unlock()
+	if s.idxReady == nil {
+		s.idxReady = map[int64]bool{}
+	}
+	s.idxReady[namespaceID] = true
+}

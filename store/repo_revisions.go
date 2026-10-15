@@ -88,15 +88,19 @@ func changedPathDirs(paths []string) map[string]bool {
 func (r *Repo) RevisionsTouching(dir string) ([]string, error) {
 	dir = strings.Trim(dir, "/")
 	// Lazy backfill: revisions written before the index existed have no rows.
-	// Build it once from the persisted changed_paths (cheap, one-time per repo).
-	var n int64
-	if err := r.cs.d.gdb.Model(&revisionPathDirRow{}).Where("namespace_id=?", r.namespaceID).Count(&n).Error; err != nil {
-		return nil, err
-	}
-	if n == 0 {
-		if err := r.ReindexPathDirs(); err != nil {
+	// Build it once per namespace. The readiness flag is cached on the store
+	// (rows are only added), so this does NOT issue a COUNT on every call.
+	if !r.cs.indexReady(r.namespaceID) {
+		var n int64
+		if err := r.cs.d.gdb.Model(&revisionPathDirRow{}).Where("namespace_id=?", r.namespaceID).Count(&n).Error; err != nil {
 			return nil, err
 		}
+		if n == 0 {
+			if err := r.ReindexPathDirs(); err != nil {
+				return nil, err
+			}
+		}
+		r.cs.markIndexReady(r.namespaceID)
 	}
 	var rows []revisionPathDirRow
 	if err := r.cs.d.gdb.Where("namespace_id=? AND dir=?", r.namespaceID, dir).
