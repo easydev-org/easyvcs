@@ -9,8 +9,11 @@ import (
 
 // The web UI (Svelte 5 + Vite + Tailwind, built by ../webui → ./ui/dist) is
 // embedded so the server binary serves it with no external files. `all:`
-// includes the Vite hashed assets. The build is committed, so `go build` needs
-// no node.
+// includes the Vite hashed assets.
+//
+// The build is NOT committed: the Dockerfile runs `npm run build` before
+// `go build`, and a local build embeds only the .gitkeep placeholder (so /ui/
+// serves a placeholder, not a real SPA). See .gitignore.
 //
 //go:embed all:ui/dist
 var uiDist embed.FS

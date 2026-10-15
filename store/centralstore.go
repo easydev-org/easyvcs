@@ -32,6 +32,20 @@ type CentralStore struct {
 	// objCache is a bounded LRU of decoded objects (content-addressed and
 	// immutable, so it never goes stale). Sized by WithObjectCache.
 	objCache *objectCache
+	// idxQueue defers the path-index write off the commit path. nil = synchronous
+	// (the safe default; the server/CLI opt in via WithAsyncIndex).
+	idxQueue *indexQueue
+}
+
+// WithAsyncIndex moves the path-index write (revision_path_dirs) off the commit
+// transaction onto a background worker. RevisionsTouching flushes the namespace
+// first, so reads still see their own writes. Returns the store for chaining.
+func (s *CentralStore) WithAsyncIndex() *CentralStore {
+	if s.idxQueue == nil {
+		s.idxQueue = newIndexQueue()
+		go s.indexWorker()
+	}
+	return s
 }
 
 // DefaultObjectCacheEntries is the default LRU capacity (number of objects).

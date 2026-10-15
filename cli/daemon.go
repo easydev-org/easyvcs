@@ -39,6 +39,9 @@ func cmdDaemon(c *ctx) {
 	if err := cs.SetWAL(); err != nil {
 		c.fatal("daemon: enable WAL:", err)
 	}
+	// The daemon is a single long-lived writer, so it can safely defer the path
+	// index off the commit path (reads flush per namespace).
+	cs.WithAsyncIndex()
 	c.cs = cs
 
 	sock := DaemonSocketPath()

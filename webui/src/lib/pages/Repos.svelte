@@ -9,7 +9,7 @@
   let repos = $state<Repo[]>([])
   let q = $state('')
   let creating = $state(false)
-  let form = $state({ org: '', name: '', visibility: 'private', init: true })
+  let form = $state({ ns: '', visibility: 'private', init: true })
   let err = $state('')
   let msg = $state('')
 
@@ -21,19 +21,18 @@
     }
   }
   onMount(load)
-  const shown = $derived(repos.filter((r) => (r.org + '/' + r.repo).toLowerCase().includes(q.toLowerCase())))
+  const shown = $derived(repos.filter((r) => r.namespace.toLowerCase().includes(q.toLowerCase())))
   async function create() {
     err = ''
     msg = ''
     try {
-      if (form.org) await api.createOrg(form.org)
-      await api.createRepo(form.org || 'default', form.name, {
+      await api.createRepo(form.ns.trim(), {
         visibility: form.visibility,
         init: form.init,
       })
-      msg = `created ${form.org || 'default'}/${form.name}`
+      msg = `created ${form.ns.trim()}`
       creating = false
-      form = { org: '', name: '', visibility: 'private', init: true }
+      form = { ns: '', visibility: 'private', init: true }
       await load()
     } catch (e) {
       err = String(e)
@@ -46,16 +45,15 @@
 <div class="mb-4 flex items-center gap-2">
   <div class="flex h-8 items-center gap-2 rounded-md border border-input bg-secondary px-3">
     <Search class="size-3.5 text-muted-foreground" />
-    <input bind:value={q} placeholder="Filter repositories" class="w-56 bg-transparent text-meta outline-none placeholder:text-muted-foreground" />
+    <input bind:value={q} placeholder="Filter namespaces" class="w-56 bg-transparent text-meta outline-none placeholder:text-muted-foreground" />
   </div>
-  <Button onclick={() => (creating = !creating)}><Plus class="size-3.5" /> New repository</Button>
-  <span class="ml-auto text-micro text-muted-foreground">{shown.length} repositories</span>
+  <Button onclick={() => (creating = !creating)}><Plus class="size-3.5" /> New namespace</Button>
+  <span class="ml-auto text-micro text-muted-foreground">{shown.length} namespaces</span>
 </div>
 
 {#if creating}
   <div class="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-card p-4">
-    <label class="text-micro text-muted-foreground">org<input bind:value={form.org} placeholder="org" class="mt-1 block h-8 w-40 rounded-md border border-input bg-secondary px-2 text-meta" /></label>
-    <label class="text-micro text-muted-foreground">name<input bind:value={form.name} placeholder="name" class="mt-1 block h-8 w-40 rounded-md border border-input bg-secondary px-2 text-meta" /></label>
+    <label class="text-micro text-muted-foreground">namespace<input bind:value={form.ns} placeholder="team/project" class="mt-1 block h-8 w-56 rounded-md border border-input bg-secondary px-2 text-meta" /></label>
     <label class="text-micro text-muted-foreground">visibility
       <select bind:value={form.visibility} class="mt-1 block h-8 rounded-md border border-input bg-secondary px-2 text-meta">
         <option value="private">private</option><option value="public">public</option>
@@ -69,12 +67,12 @@
 <div class="overflow-hidden rounded-lg border border-border bg-card">
   <table class="w-full border-collapse">
     <tbody>
-      {#each shown as r (r.org + '/' + r.repo)}
+      {#each shown as r (r.namespace)}
         <tr class="border-b border-border/60 last:border-0 hover:bg-secondary">
           <td class="px-4 py-2.5">
             <button onclick={() => onOpen(r)} class="flex items-center gap-2 text-meta hover:underline">
               <FolderGit2 class="size-3.5 text-muted-foreground" />
-              <span><span class="text-muted-foreground">{r.org}/</span><span class="font-medium">{r.repo}</span></span>
+              <span class="font-medium">{r.namespace}</span>
             </button>
           </td>
           <td class="px-4 py-2.5 text-right text-micro text-muted-foreground">{r.default_branch}</td>

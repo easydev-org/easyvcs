@@ -26,13 +26,14 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     GOPROXY=https://proxy.golang.org \
     GOWORK=off \
     CGO_ENABLED=0
-RUN apk add --no-cache ca-certificates git
+RUN apk add --no-cache ca-certificates git nodejs npm
 WORKDIR /src
 COPY . .
-# Build ./cmd/server from the root module (the CLI module under ./cli is NOT
-# needed here). `-mod=mod` lets Go reconcile go.sum; `-trimpath -s -w` keeps the
-# binary small.
-RUN go build -mod=mod -trimpath -ldflags="-s -w" -o /out/easyvcs-server ./cmd/server
+# Build the web UI FIRST (it is NOT committed): vite writes ../server/ui/dist,
+# which the server embeds via //go:embed. Then build ./cmd/server from the root
+# module (the CLI module under ./cli is NOT needed here).
+RUN cd webui && npm ci --no-audit --no-fund && npm run build && cd .. \
+    && go build -mod=mod -trimpath -ldflags="-s -w" -o /out/easyvcs-server ./cmd/server
 
 # ---- runtime ----
 FROM ${REGISTRY}/alpine:${ALPINE}

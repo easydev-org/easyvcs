@@ -8,3 +8,7 @@
 go.work.sum
 /easyvcs-server
 /cmd/server/server
+
+# webui build output (built by the Dockerfile / `npm run build`; not committed)
+/server/ui/dist/*
+!/server/ui/dist/.gitkeep

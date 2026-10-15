@@ -18,22 +18,22 @@
 
   async function loadMeta() {
     try {
-      meta = await api.repo(repo.org, repo.repo)
+      meta = await api.repo(repo.namespace)
     } catch {}
   }
   async function loadTab() {
     err = ''
     try {
       if (tab === 'code') await loadTree()
-      else if (tab === 'branches') branches = (await api.branches(repo.org, repo.repo)).branches ?? []
-      else if (tab === 'tags') tags = (await api.tags(repo.org, repo.repo)).tags ?? []
-      else commits = (await api.log(repo.org, repo.repo, ref)).commits ?? []
+      else if (tab === 'branches') branches = (await api.branches(repo.namespace)).branches ?? []
+      else if (tab === 'tags') tags = (await api.tags(repo.namespace)).tags ?? []
+      else commits = (await api.log(repo.namespace, ref)).commits ?? []
     } catch (e) {
       err = String(e)
     }
   }
   async function loadTree() {
-    entries = (await api.tree(repo.org, repo.repo, ref, path)).entries ?? []
+    entries = (await api.tree(repo.namespace, ref, path)).entries ?? []
   }
   async function open(e: Entry) {
     if (e.kind === 'dir') {
@@ -41,7 +41,7 @@
       blob = null
       await loadTree()
     } else {
-      blob = await api.blob(repo.org, repo.repo, ref, e.path)
+      blob = await api.blob(repo.namespace, ref, e.path)
     }
   }
   function up() {
@@ -57,7 +57,7 @@
       setTimeout(() => (copied = ''), 1200)
     } catch {}
   }
-  const cloneUrl = $derived(`${location.origin}/api/v1/repos/${repo.org}/${repo.repo}`)
+  const cloneUrl = $derived(`${location.origin}/api/v1/namespaces/${repo.namespace}`)
   const fmtSize = (n: number) => (n < 1024 ? n + ' B' : (n / 1024).toFixed(1) + ' KB')
   const when = (ms?: number) => (ms ? new Date(ms).toLocaleString() : '')
 
@@ -72,8 +72,8 @@
 </script>
 
 <div class="mb-3 flex items-center gap-2">
-  <button onclick={onBack} class="text-meta text-muted-foreground hover:text-foreground">← repositories</button>
-  <h2 class="text-body font-semibold">{repo.org}/{repo.repo}</h2>
+  <button onclick={onBack} class="text-meta text-muted-foreground hover:text-foreground">← namespaces</button>
+  <h2 class="text-body font-semibold">{repo.namespace}</h2>
   <Badge variant="muted"><GitBranch class="mr-1 size-3" />{ref}</Badge>
   {#if meta.visibility}<Badge variant="muted">{meta.visibility}</Badge>{/if}
 </div>
@@ -102,7 +102,7 @@
   {#if path}
     <div class="mb-2 flex items-center gap-2">
       <button onclick={up} class="flex items-center gap-1 text-micro text-primary hover:underline"><ArrowUp class="size-3" /> up</button>
-      <span class="font-mono text-micro text-muted-foreground">{repo.repo}/{path}</span>
+      <span class="font-mono text-micro text-muted-foreground">{repo.namespace}/{path}</span>
     </div>
   {/if}
   {#if blob}

@@ -181,6 +181,9 @@ type RepoStore interface {
 	// at expectHash (optimistic concurrency; ErrRevisionChanged otherwise).
 	UpdateRevisionHashCAS(revisionID string, expectHash, newHash object.ID) error
 	ListRevisions() ([]*Revision, error)
+	// IndexRevision records/defer the path index for a revision (call after a
+	// PutRevisionTx transaction commits).
+	IndexRevision(r *Revision) error
 
 	// Refs. PutRef uses r.Path; GetRef/DeleteRef/ListRefs operate on the ROOT
 	// scope (path "") for back-compat. The *In variants take an explicit scope.

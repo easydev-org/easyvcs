@@ -345,6 +345,13 @@ func ApplyTx(repo *store.Repo, b *Bundle) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Path index for the applied revisions: after the transaction commits (async
+	// enqueues, sync writes). transfer.Apply is used by push/fetch/import.
+	for _, ch := range b.Revisions {
+		if err := repo.IndexRevision(ch); err != nil {
+			return 0, err
+		}
+	}
 	return len(b.Revisions), nil
 }
 

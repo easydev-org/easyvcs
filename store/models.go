@@ -101,9 +101,12 @@ type revisionRow struct {
 // already a content-addressed object, this index is all that is needed to treat
 // any subpath as a (recursive) repository — no content is duplicated.
 type revisionPathDirRow struct {
-	NamespaceID int64  `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:3"`
+	// Primary key (dir, revision_id, namespace_id) backs "revisions touching a
+	// dir" (the hot query). A SECOND index on (namespace_id, revision_id) backs
+	// the per-revision delete (re-index on amend), which the PK cannot serve.
+	NamespaceID int64  `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:3;index:idx_rpd_rev,priority:1"`
 	Dir         string `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:1"`
-	RevisionID  string `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:2"`
+	RevisionID  string `gorm:"primaryKey;not null;index:idx_rpd_dir,priority:2;index:idx_rpd_rev,priority:2"`
 }
 
 func (revisionPathDirRow) TableName() string { return "revision_path_dirs" }

@@ -21,6 +21,12 @@ func (r *Repo) PutRevision(rev *Revision) error {
 	}).Create(row).Error; err != nil {
 		return err
 	}
+	// Async: defer the index write to the background worker (read-your-writes is
+	// preserved by RevisionsTouching's flush).
+	if r.cs.idxQueue != nil {
+		r.cs.idxQueue.enqueue(r.namespaceID, rev.ID, rev.ChangedPaths)
+		return nil
+	}
 	return r.indexRevisionPaths(rev)
 }
 
@@ -33,7 +39,22 @@ func (r *Repo) PutRevisionTx(tx *gorm.DB, rev *Revision) error {
 	}).Create(row).Error; err != nil {
 		return err
 	}
-	return r.indexRevisionPathsTx(tx, rev)
+	// The index is NOT written here: it is either deferred (async) or written by
+	// the caller via IndexRevision AFTER the transaction commits. Writing it
+	// inside the tx would both bloat the commit and (async) duplicate the work.
+	return nil
+}
+
+// IndexRevision records (or defers) the path index for a revision. When the
+// store runs with an async index it enqueues the job; otherwise it writes the
+// rows now. PutRevisionTx leaves the index out (it runs inside a transaction);
+// the caller invokes IndexRevision AFTER the transaction commits.
+func (r *Repo) IndexRevision(rev *Revision) error {
+	if r.cs.idxQueue != nil {
+		r.cs.idxQueue.enqueue(r.namespaceID, rev.ID, rev.ChangedPaths)
+		return nil
+	}
+	return r.indexRevisionPaths(rev)
 }
 
 // indexRevisionPaths records the directory prefixes a revision touched, so a
@@ -87,6 +108,8 @@ func changedPathDirs(paths []string) map[string]bool {
 // path index, so it is O(revisions under dir), not O(all revisions).
 func (r *Repo) RevisionsTouching(dir string) ([]string, error) {
 	dir = strings.Trim(dir, "/")
+	// Read-your-writes: drain this namespace's deferred index jobs first.
+	r.cs.idxQueue.flush(r.namespaceID)
 	// Lazy backfill: revisions written before the index existed have no rows.
 	// Build it once per namespace. The readiness flag is cached on the store
 	// (rows are only added), so this does NOT issue a COUNT on every call.

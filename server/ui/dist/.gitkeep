@@ -1,0 +1,4 @@
+# The web UI (Svelte, ../webui) is built into this directory. It is NOT
+# committed: the Dockerfile builds it (npm run build) before `go build`, and a
+# local `go build` embeds only this placeholder (the /ui/ route then 404s). This
+# .gitkeep exists so `//go:embed all:ui/dist` has a non-empty dir to embed.

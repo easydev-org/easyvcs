@@ -145,5 +145,11 @@ func (w *Workspace) CommitFromChanges(parentHash object.ID, changes []FileChange
 	if err := tx.Commit().Error; err != nil {
 		return nil, nil, err
 	}
+	// Path index: after the revision row is durable. With an async index this
+	// enqueues; otherwise it writes synchronously (PutRevisionTx skipped it only
+	// when async, so the sync path must not double-write — see PutRevisionTx).
+	if err := w.store.IndexRevision(rev); err != nil {
+		return nil, nil, err
+	}
 	return snap, rev, nil
 }
