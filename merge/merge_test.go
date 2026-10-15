@@ -40,6 +40,9 @@ func (f *fakeTreeOps) WriteConflict(c *object.Conflict) (object.ID, error) {
 func (f *fakeTreeOps) ReadConflict(id object.ID) (*object.Conflict, error) {
 	return nil, fmt.Errorf("no conflicts in fakeTreeOps")
 }
+func (f *fakeTreeOps) MergeText(base, ours, theirs []byte) ([]byte, bool) {
+	return nil, false // fakeTreeOps has no text merge; always conflict
+}
 
 func blobEntry(name string, data []byte) object.Entry {
 	return object.Entry{Name: name, Kind: object.KindBlob, ID: object.BlobID(data)}

@@ -72,6 +72,12 @@ func (w *Workspace) WriteBlob(data []byte) (object.ID, error) {
 // treeOps adapter satisfies merge.treeOps.
 
 // WriteConflict implements merge.treeOps.
+// MergeText implements merge.treeOps: a diff3-style line merge. On overlap it
+// returns (nil, false) so the merge layer emits a conflict object instead.
+func (w *Workspace) MergeText(base, ours, theirs []byte) ([]byte, bool) {
+	return mergeFileText(base, ours, theirs)
+}
+
 // ReadConflict implements merge.treeOps: it loads a conflict object so a nested
 // conflict can be flattened during a merge.
 func (w *Workspace) ReadConflict(id object.ID) (*object.Conflict, error) {

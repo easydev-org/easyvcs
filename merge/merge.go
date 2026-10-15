@@ -25,6 +25,11 @@ type treeOps interface {
 	// ReadConflict loads a conflict object (so a nested conflict can be FLATTENED
 	// into an N-way one instead of being treated as an opaque blob).
 	ReadConflict(id object.ID) (*object.Conflict, error)
+	// MergeText attempts a diff3-style line merge of (base, ours, theirs). It
+	// returns (merged, true) when the two sides touch DISJOINT line regions (a
+	// safe textual merge) and (nil, false) on overlap / binary / missing base —
+	// the caller then builds a first-class conflict object.
+	MergeText(base, ours, theirs []byte) ([]byte, bool)
 	WriteBlob(data []byte) (object.ID, error)
 	WriteTree(t *object.Tree) (object.ID, error)
 	WriteConflict(c *object.Conflict) (object.ID, error)
@@ -309,6 +314,17 @@ func mergeEntry(name string, base, ours, theirs object.Entry, ops treeOps) (*obj
 		if theirs.ID == base.ID {
 			return &ours, nil, nil
 		}
+		// Both sides changed the SAME blob. Attempt a LINE-LEVEL 3-way merge:
+		// disjoint line edits combine cleanly into one blob (so the common case
+		// — two authors editing different lines of one file — needs no conflict).
+		// Overlap / binary => fall through to a first-class conflict object.
+		if merged, ok := mergeBlobText(base.ID, ours.ID, theirs.ID, ops); ok {
+			id, werr := ops.WriteBlob(merged)
+			if werr != nil {
+				return nil, nil, werr
+			}
+			return &object.Entry{Name: name, Kind: object.KindBlob, ID: id}, nil, nil
+		}
 	}
 	// One side unchanged from base, the other deleted -> take the deletion
 	// (a non-conflicting 3-way). This is what makes rebase/drop/revert
@@ -429,6 +445,24 @@ func dedupeTerms(terms []object.Term, byIDOnly bool) []object.Term {
 		out = append(out, t)
 	}
 	return out
+}
+
+// mergeBlobText loads three blobs and attempts a textual 3-way merge. Any read
+// failure or an overlap returns ok=false (the caller makes a conflict).
+func mergeBlobText(base, ours, theirs object.ID, ops treeOps) ([]byte, bool) {
+	b, err := ops.ReadBlob(base)
+	if err != nil {
+		return nil, false
+	}
+	o, err := ops.ReadBlob(ours)
+	if err != nil {
+		return nil, false
+	}
+	t, err := ops.ReadBlob(theirs)
+	if err != nil {
+		return nil, false
+	}
+	return ops.MergeText(b, o, t)
 }
 
 // conflictTerms returns the flattened terms of an entry that is a conflict
