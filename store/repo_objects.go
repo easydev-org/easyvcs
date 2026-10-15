@@ -18,7 +18,12 @@ func (r *Repo) WriteObject(o *object.Object) error {
 	}
 	row := &objectRow{ID: id.String(), Kind: int(o.Kind), Content: payload}
 	// ON CONFLICT DO NOTHING
-	return r.cs.d.gdb.Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error
+	if err := r.cs.d.gdb.Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error; err != nil {
+		return err
+	}
+	// A just-written object is hot: seed the cache.
+	r.cs.objCache.put(id, o)
+	return nil
 }
 
 // WriteObjectsBatch stores many objects in a single transaction, reducing
@@ -46,6 +51,9 @@ func (r *Repo) WriteObjectsBatch(objs []*object.Object) error {
 
 // ReadObject reads a global content-addressed object.
 func (r *Repo) ReadObject(id object.ID) (*object.Object, error) {
+	if o, ok := r.cs.objCache.get(id); ok {
+		return o, nil
+	}
 	var row objectRow
 	err := r.cs.d.gdb.Where("sha=?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -54,7 +62,12 @@ func (r *Repo) ReadObject(id object.ID) (*object.Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	return object.DecodeObject(id, row.Content)
+	o, err := object.DecodeObject(id, row.Content)
+	if err != nil {
+		return nil, err
+	}
+	r.cs.objCache.put(id, o)
+	return o, nil
 }
 
 // ObjectIDs returns all content-addressed object ids held anywhere in the

@@ -29,7 +29,23 @@ type CentralStore struct {
 	// RevisionsTouching call.
 	idxMu    sync.Mutex
 	idxReady map[int64]bool
+	// objCache is a bounded LRU of decoded objects (content-addressed and
+	// immutable, so it never goes stale). Sized by WithObjectCache.
+	objCache *objectCache
 }
+
+// DefaultObjectCacheEntries is the default LRU capacity (number of objects).
+const DefaultObjectCacheEntries = 4096
+
+// WithObjectCache sets the object-cache capacity (0 disables). It returns the
+// store for chaining. Call before serving.
+func (s *CentralStore) WithObjectCache(entries int) *CentralStore {
+	s.objCache = newObjectCache(entries)
+	return s
+}
+
+// ObjectCacheStats returns (hits, misses) for the object cache.
+func (s *CentralStore) ObjectCacheStats() (uint64, uint64) { return s.objCache.stats() }
 
 // HomeDir returns the EasyVCS home directory (default ~/.easyvcs, overridable
 // via EASYVCS_HOME).

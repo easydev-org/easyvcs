@@ -65,7 +65,11 @@ func (w *Workspace) CommitFromChanges(parentHash object.ID, changes []FileChange
 	}
 
 	// Apply each change to the working tree by rewriting the base tree.
+	// Apply the changes, COLLECTING the new blobs (instead of writing each one
+	// immediately) so they can be flushed in ONE batch inside the transaction —
+	// a per-file write is a separate DB round-trip (and fsync).
 	newTree := baseTree
+	var blobs []*object.Object
 	for _, c := range changes {
 		if c.Delete {
 			tid, err := w.resolvePath(newTree, c.Path, object.ID{}, true)
@@ -75,17 +79,17 @@ func (w *Workspace) CommitFromChanges(parentHash object.ID, changes []FileChange
 			newTree = w.mustTree(tid)
 			continue
 		}
-		blobID, err := w.WriteBlob(c.Content)
-		if err != nil {
-			return nil, nil, err
-		}
-		tid, err := w.resolvePath(newTree, c.Path, blobID, false)
+		blob := &object.Object{Kind: object.KindBlob, Blob: c.Content}
+		blobs = append(blobs, blob)
+		tid, err := w.resolvePath(newTree, c.Path, blob.ID(), false)
 		if err != nil {
 			return nil, nil, err
 		}
 		newTree = w.mustTree(tid)
 	}
 
+	// Write the tree(s) built by resolvePath (writeTree persists them) + the
+	// root tree. These are already batched below via the transaction.
 	treeID, err := w.writeTree(newTree)
 	if err != nil {
 		return nil, nil, err
@@ -124,7 +128,8 @@ func (w *Workspace) CommitFromChanges(parentHash object.ID, changes []FileChange
 	// persisted. Blobs were created via WriteBlob (already persisted individually)
 	// but to be safe we write the root tree object here.
 	treeObj := &object.Object{Kind: object.KindTree, Tree: rootTree}
-	if err := w.store.WriteObjectsBatchTx(tx, []*object.Object{treeObj}); err != nil {
+	batch := append([]*object.Object{treeObj}, blobs...)
+	if err := w.store.WriteObjectsBatchTx(tx, batch); err != nil {
 		return nil, nil, err
 	}
 	if err := w.store.PutSnapshotTx(tx, snap); err != nil {

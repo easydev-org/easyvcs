@@ -53,14 +53,24 @@ go test ./transfer/ -run '^$' -bench . -benchtime=2s
 SetWAL** —— 打开 DB 与 `PRAGMA journal_mode=WAL` 都是写操作，纯读不应付这个代价。
 **可选 daemon**（`easyvcs daemon`）把 store 常驻，**彻底消除每次命令的冷启动**。
 
+## 4b. 已落地的优化
+
+| 优化 | 效果 |
+|---|---|
+| **路径索引就绪缓存** | `RevisionsTouching` ~360µs → **~35µs**（10×）|
+| **对象 LRU 缓存**（默认 4096 项）| 重复 tree/blob 读**免 DB 往返**；内容寻址不可变 → 永不过期 |
+| **提交批量写** | blob 收集后**一次事务批量写**（不再每文件一次往返）|
+| **对象级 push delta**（Bloom）| 不再重传服务端已有对象 |
+| **只读命令懒开库** | 冷启动 ↓（不 SetWAL/不迁移）|
+
 ## 5. 已知短板（诚实）
 
 | 短板 | 影响 | 缓解 |
 |---|---|---|
 | **无 delta 压缩**（blob 整块存）| 频繁改**大文件** → DB 快速增长 | 大文件不频繁改时**可接受**（内容寻址仍去重；读 O(1)）；将来可按大小启用 delta |
 | **中心 DB 写** | 同 namespace 提交串行 | **跨 namespace 并行**（advisory lock 按 repo）；Postgres + 多副本 |
-| **多表写 + 索引写放大** | 单次提交 ~2.2 ms | 批量写、异步索引（未做）|
-| **读走 DB** | tree 每次 `ReadObject` | 对象 LRU 缓存（未做）|
+| **多表写 + 索引写放大** | 单次提交 ~2 ms | **批量写已做**；异步索引未做 |
+| **读走 DB** | tree 每次 `ReadObject` | **对象 LRU 缓存已做**（默认 4096）|
 
 ## 6. 适用边界
 

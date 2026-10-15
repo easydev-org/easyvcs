@@ -69,6 +69,7 @@ func OpenDriver(cfg DriverConfig) (*CentralStore, error) {
 
 	d := &sqlDialect{db: sqlDB, gdb: db, kind: kind}
 	cs := &CentralStore{d: d, root: rootFor(kind, dsn), idxReady: map[int64]bool{}}
+	cs.WithObjectCache(DefaultObjectCacheEntries)
 	if err := cs.Init(); err != nil {
 		return nil, err
 	}
