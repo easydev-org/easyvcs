@@ -62,3 +62,37 @@ func BenchmarkCommitFromChangesManyFiles(b *testing.B) {
 		parent = snap.RevisionHash
 	}
 }
+
+// benchCommitN times N commits on a fresh store with/without the async index,
+// reporting ns/op. Shared by the sync/async variants below.
+func benchCommitN(b *testing.B, async bool) {
+	home := b.TempDir()
+	b.Setenv("EASYVCS_HOME", home)
+	cs, err := store.OpenDefault()
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = cs.Close() })
+	if async {
+		cs.WithAsyncIndex()
+	}
+	repo, _ := cs.Create(store.NSRef{Name: "idxbench"})
+	ws := NewWorkspace(repo)
+	var parent object.ID
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snap, _, err := ws.CommitFromChanges(parent,
+			[]FileChangeSpec{{Path: fmt.Sprintf("pkg/sub/f%d.txt", i), Content: []byte(fmt.Sprintf("c-%d", i))}},
+			"c", store.Author{Name: "t"}, "")
+		if err != nil {
+			b.Fatal(err)
+		}
+		parent = snap.RevisionHash
+	}
+}
+
+// BenchmarkCommitSyncIndex is the commit path with the index written inline.
+func BenchmarkCommitSyncIndex(b *testing.B) { benchCommitN(b, false) }
+
+// BenchmarkCommitAsyncIndex defers the index to a background worker.
+func BenchmarkCommitAsyncIndex(b *testing.B) { benchCommitN(b, true) }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"sync"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -17,9 +18,10 @@ import (
 // calls Flush(namespaceID) first, so a query never misses a just-written
 // revision (read-your-writes); other namespaces are unaffected.
 type indexQueue struct {
-	mu    sync.Mutex
-	cond  *sync.Cond
-	pends []indexJob
+	mu       sync.Mutex
+	cond     *sync.Cond
+	debounce time.Duration
+	pends    []indexJob
 	// inFlight tracks, per namespace, how many jobs are still queued or being
 	// applied, so Flush can wait for a specific namespace to drain.
 	nsPending map[int64]int
@@ -32,7 +34,8 @@ type indexJob struct {
 }
 
 func newIndexQueue() *indexQueue {
-	q := &indexQueue{nsPending: map[int64]int{}}
+	// A short debounce lets back-to-back commits accumulate one index batch.
+	q := &indexQueue{nsPending: map[int64]int{}, debounce: 5 * time.Millisecond}
 	q.cond = sync.NewCond(&q.mu)
 	return q
 }
@@ -49,13 +52,19 @@ func (q *indexQueue) enqueue(namespaceID int64, revisionID string, paths []strin
 	q.cond.Signal()
 }
 
-// take removes and returns all pending jobs (called by the worker).
+// take waits for at least one job, then DEBOUNCES briefly to accumulate a
+// batch: a burst of commits (e.g. a push of many revisions) collapses into ONE
+// index transaction instead of one per revision — the real win of deferring the
+// index, since each transaction pays a separate commit/fsync.
 func (q *indexQueue) take() []indexJob {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	for len(q.pends) == 0 {
 		q.cond.Wait()
 	}
+	q.mu.Unlock()
+	time.Sleep(q.debounce)
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	jobs := q.pends
 	q.pends = nil
 	return jobs
