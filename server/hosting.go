@@ -127,6 +127,9 @@ func (s *Server) mountHosting(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/tree", s.requireRepoAccess(false, s.handleTree))
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/blob", s.requireRepoAccess(false, s.handleBlob))
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/raw", s.requireRepoAccess(false, s.handleRaw))
+	// Structured conflict view + raw object bytes (for binary/dir conflict terms).
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/conflict", s.requireRepoAccess(false, s.handleConflict))
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/object", s.requireRepoAccess(false, s.handleObject))
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/log", s.requireRepoAccess(false, s.handleLog))
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/commit/{sha}", s.requireRepoAccess(false, s.handleCommit))
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/diff", s.requireRepoAccess(false, s.handleDiff))

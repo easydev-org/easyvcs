@@ -35,6 +35,24 @@ export interface User {
   created?: number
 }
 
+export interface ConflictTerm {
+  role: string
+  label: string
+  path?: string
+  sha: string
+  kind: 'blob' | 'dir' | 'conflict' | 'absent' | 'unknown' | 'other'
+  size?: number
+  is_text?: boolean
+  is_binary?: boolean
+  content?: string
+  entries?: string[]
+}
+export interface ConflictView {
+  path: string
+  conflict_sha: string
+  terms: ConflictTerm[]
+}
+
 export class Api {
   constructor(private token: () => string) {}
   private h(): HeadersInit {
@@ -63,6 +81,14 @@ export class Api {
     this.req<{ commits: Commit[] }>(
       `/api/v1/namespaces/${ns}/log?` + new URLSearchParams({ ref, limit: String(limit) }),
     )
+  // Structured conflict view: every WAY (base/ours/theirs/…) with its content
+  // (text inline; binary/dir carry a sha to fetch via objectUrl).
+  conflict = (ns: string, ref: string, path: string) =>
+    this.req<ConflictView>(
+      `/api/v1/namespaces/${ns}/conflict?` + new URLSearchParams({ ref, path }),
+    )
+  objectUrl = (ns: string, sha: string) =>
+    `/api/v1/namespaces/${ns}/object?` + new URLSearchParams({ sha })
   branches = (ns: string) => this.req<{ branches: Ref[] }>(`/api/v1/namespaces/${ns}/branches`)
   tags = (ns: string) => this.req<{ tags: Ref[] }>(`/api/v1/namespaces/${ns}/tags`)
   users = () => this.req<{ users: User[] }>('/api/v1/users')

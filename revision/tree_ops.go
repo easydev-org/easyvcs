@@ -78,6 +78,12 @@ func (w *Workspace) MergeText(base, ours, theirs []byte) ([]byte, bool) {
 	return mergeFileText(base, ours, theirs)
 }
 
+// ReadObject loads any object (blob/tree/conflict) by id. Used by the browse
+// layer to render a conflict's terms and to serve raw object bytes.
+func (w *Workspace) ReadObject(id object.ID) (*object.Object, error) {
+	return w.store.ReadObject(id)
+}
+
 // ReadConflict implements merge.treeOps: it loads a conflict object so a nested
 // conflict can be flattened during a merge.
 func (w *Workspace) ReadConflict(id object.ID) (*object.Conflict, error) {

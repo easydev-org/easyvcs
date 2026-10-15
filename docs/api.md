@@ -133,12 +133,14 @@ the base (git's *update branch / merge base into this branch*). Auth is
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | GET | `/api/v1/namespaces/{ns}/tree?ref=&path=` | read | directory listing (name/kind/size/sha) |
-| GET | `/api/v1/namespaces/{ns}/blob?ref=&path=` | read | text inline; binary is flagged (use `/raw`) |
+| GET | `/api/v1/namespaces/{ns}/blob?ref=&path=` | read | text inline; binary is flagged (use `/raw`). A CONFLICTED file carries `conflict:true` and the marker text |
 | GET | `/api/v1/namespaces/{ns}/raw?ref=&path=` | read | raw bytes (any content type) |
 | GET | `/api/v1/namespaces/{ns}/log?ref=&path=&limit=` | read | commit history (or a file's history); each entry has `author` + `session`. **`ref` empty = the whole namespace's revisions; `ref` set (branch/tag/revision id) = only the revisions REACHABLE from it** (the branch's own history, along first-parent + fork edges); an unknown `ref` is 404 |
 | GET | `/api/v1/namespaces/{ns}/commit/{sha}` | read | commit/snapshot metadata (`author` + `session`) |
 | GET | `/api/v1/namespaces/{ns}/diff?base=&head=` | read | per-file diff between two snapshots (`binary` flag) |
 | GET | `/api/v1/namespaces/{ns}/blame?ref=&path=` | read | line-level attribution (`author` + `session` per line) |
+| GET | `/api/v1/namespaces/{ns}/conflict?ref=&path=` | read | STRUCTURED view of a conflict: `{path, conflict_sha, terms:[{role,label,path,kind,size?,is_text?,is_binary?,content?,entries?,sha}]}` — every WAY (base/ours/theirs/…) with its content. Text terms inline `content`; binary terms carry `sha` (fetch via `/object?sha=`); dir terms carry `entries` |
+| GET | `/api/v1/namespaces/{ns}/object?sha=` | read | raw bytes of any object by id: a blob streams its bytes; a tree returns a JSON listing; a conflict returns its marker text |
 | GET | `/api/v1/namespaces/{ns}/archive/{ref}.tar.gz` | read | the tree at `ref` as a gzipped tar (streamed; sandbox checkout). The ref must be explicit (`main.tar.gz`); a non-`.tar.gz` path is 400, an unknown ref is 404. Optional `?path=<dir>` archives only that **subtree**, rooted AT the directory (its entries appear at the archive root) |
 
 ## git smart HTTP (read-only)

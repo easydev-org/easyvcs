@@ -409,3 +409,162 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 		log.Printf("easyvcs-server: archive subtree %q @ %s: %v", sub, ref, err)
 	}
 }
+
+// handleConflict returns the STRUCTURED view of a conflict at ?path=: each way
+// (base/ours/theirs/…) with its label, path, kind, and — for a text blob — its
+// content inline. Binary and directory ways are NOT inlined (the marker text
+// would be a lossy placeholder); they carry their `sha` so the client can fetch
+// the raw bytes via /object/{sha} or list the directory via /tree.
+func (s *Server) handleConflict(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	ws := revision.NewWorkspace(repo)
+	path := scopePath(r)
+	if path == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("path is required"))
+		return
+	}
+	treeID, err := resolveRefTree(repo, ws, r.URL.Query().Get("ref"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	tree, err := ws.ReadTree(treeID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	entry, err := ws.FindEntry(tree, path)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if entry.Kind != object.KindConflict {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("%s is not a conflict", path))
+		return
+	}
+	c, err := ws.ReadConflict(entry.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	terms := make([]map[string]any, 0, len(c.Removes)+len(c.Adds))
+	for _, t := range c.Removes {
+		terms = append(terms, s.conflictTermView(ws, "base", t))
+	}
+	for i, t := range c.Adds {
+		role := t.Label
+		if role == "" {
+			role = fmt.Sprintf("side%d", i)
+		}
+		terms = append(terms, s.conflictTermView(ws, role, t))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":         path,
+		"conflict_sha": entry.ID.String(),
+		"terms":        terms,
+	})
+}
+
+// conflictTermView renders one conflict term: its role/label/path, the object
+// kind, and (for a text blob) the content inline. Binary/dir/absent terms carry
+// no content but do carry their sha (fetch via /object/{sha} or /tree).
+func (s *Server) conflictTermView(ws *revision.Workspace, role string, t object.Term) map[string]any {
+	v := map[string]any{"role": role, "label": t.Label, "path": t.Path, "sha": t.ID.String()}
+	if t.ID == (object.ID{}) {
+		v["kind"] = "absent" // a deletion side
+		return v
+	}
+	o, err := ws.ReadObject(t.ID)
+	if err != nil {
+		v["kind"] = "unknown"
+		return v
+	}
+	switch o.Kind {
+	case object.KindBlob:
+		v["kind"] = "blob"
+		v["size"] = len(o.Blob)
+		if revision.IsBinary(o.Blob) {
+			v["is_binary"] = true
+		} else {
+			v["is_text"] = true
+			v["content"] = string(o.Blob)
+		}
+	case object.KindTree:
+		v["kind"] = "dir"
+		if tt, err := ws.ReadTree(t.ID); err == nil {
+			names := make([]string, 0, len(tt.Entries))
+			for _, e := range tt.SortedEntries() {
+				names = append(names, e.Name)
+			}
+			v["entries"] = names
+		}
+	case object.KindConflict:
+		v["kind"] = "conflict" // a nested conflict term
+		v["content"] = ""
+	default:
+		v["kind"] = "other"
+	}
+	return v
+}
+
+// handleObject serves the RAW bytes of any object by id (?sha=), so a client can
+// fetch the actual bytes of a BINARY conflict term (which the marker text only
+// placeholders). Content-addressed and immutable, so it is safe to cache.
+func (s *Server) handleObject(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	ws := revision.NewWorkspace(repo)
+	sha := strings.TrimSpace(r.URL.Query().Get("sha"))
+	id, err := object.HexToID(sha)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid sha: %w", err))
+		return
+	}
+	o, err := ws.ReadObject(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	switch o.Kind {
+	case object.KindBlob:
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("X-Object-Kind", "blob")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(o.Blob)
+	case object.KindTree:
+		// Serve the directory as a JSON listing (a tree has no bytes to stream).
+		names := make([]map[string]any, 0)
+		for _, e := range o.Tree.SortedEntries() {
+			names = append(names, map[string]any{"name": e.Name, "kind": entryKindName(e.Kind), "sha": e.ID.String()})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"kind": "dir", "entries": names})
+	case object.KindConflict:
+		text, cerr := ws.RenderConflict(id)
+		if cerr != nil {
+			writeErr(w, http.StatusInternalServerError, cerr)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Object-Kind", "conflict")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(text))
+	default:
+		writeErr(w, http.StatusBadRequest, errors.New("unsupported object kind"))
+	}
+}
+
+func entryKindName(k object.Kind) string {
+	switch k {
+	case object.KindTree:
+		return "dir"
+	case object.KindConflict:
+		return "conflict"
+	default:
+		return "file"
+	}
+}
