@@ -28,7 +28,7 @@
 <div class="flex h-dvh flex-col bg-background text-foreground">
   <header class="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-5 backdrop-blur">
     <div class="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground"><FolderGit2 class="size-4" /></div>
-    <div class="leading-tight"><h1 class="text-body font-semibold">EasyVCS</h1><p class="text-micro text-muted-foreground">{i18n.t('common.repositories')}</p></div>
+    <div class="leading-tight"><h1 class="text-body font-semibold">EasyVCS</h1><p class="text-micro text-muted-foreground">{i18n.t('common.tagline')}</p></div>
     <div class="ml-auto flex items-center gap-2">
       <button
         onclick={() => i18n.set(i18n.lang === 'en' ? 'zh' : 'en')}
@@ -46,7 +46,7 @@
     {#each [['repos', FolderGit2], ['users', UsersIcon]] as [id, Icon] (id)}
       <button onclick={() => { page = id; openRepo = null }}
         class="flex items-center gap-1.5 border-b-2 px-3 py-2 text-meta transition {page === id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}">
-        <Icon class="size-3.5" />{i18n.t(id === 'repos' ? 'nav.repos' : 'nav.users')}
+        <Icon class="size-3.5" />{i18n.t(id === 'repos' ? 'nav.namespaces' : 'nav.users')}
       </button>
     {/each}
   </nav>

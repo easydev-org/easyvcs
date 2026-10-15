@@ -1,11 +1,10 @@
 import type { Dict } from './en'
 
-// Simplified Chinese. The type annotation `Dict` makes a missing/extra/mistyped
-// key a COMPILE error, so the two languages can never drift.
+// 简体中文。使用 easyvcs 原生概念：namespace 是容器；旧的 “repository” 是 ?path=
+// 作用域；一次变更是 revision；协作单元是 Revision Request（合并请求）。
 export const zh: Dict = {
   common: {
     connect: '连接',
-    cancel: '取消',
     create: '创建',
     close: '关闭',
     merge: '合并',
@@ -13,19 +12,18 @@ export const zh: Dict = {
     loading: '加载中…',
     none: '无',
     noChanges: '无变更',
-    repositories: '仓库',
-    tokenPlaceholder: '令牌（私有仓库 / 管理员）',
+    tagline: '原生版本控制系统',
+    tokenPlaceholder: '令牌（私有命名空间 / 管理员）',
     language: '语言',
   },
   nav: {
-    repos: '仓库',
+    namespaces: '命名空间',
     users: '用户',
   },
-  repos: {
-    title: '命名空间',
+  namespaces: {
     filter: '筛选命名空间',
     new: '新建命名空间',
-    namespace: '命名空间',
+    label: '命名空间',
     visibility: '可见性',
     privateLabel: '私有',
     publicLabel: '公开',
@@ -33,7 +31,7 @@ export const zh: Dict = {
     created: '已创建 {ns}',
     count: '{n} 个命名空间',
   },
-  repo: {
+  ns: {
     back: '命名空间',
     clone: '克隆',
     up: '上级',
@@ -46,17 +44,15 @@ export const zh: Dict = {
     directory: '目录',
     deleted: '（已删除）',
     use: '采用',
-    ways: '各方',
   },
   tabs: {
     code: '代码',
     branches: '分支',
     tags: '标签',
-    commits: '提交',
+    revisions: '版本',
     requests: '合并请求',
   },
-  requests: {
-    title: '合并请求',
+  rr: {
     none: '暂无合并请求',
     back: '合并请求',
     source: '来源',
@@ -68,11 +64,11 @@ export const zh: Dict = {
     comments: '评论',
     noComments: '暂无评论',
     addComment: '添加评论',
-    newRequest: '新建合并请求',
+    new: '新建合并请求',
     sourceBranch: '来源分支',
     targetBranch: '目标分支',
-    titleLabel: '标题',
-    bodyOptional: '描述（可选）',
+    title: '标题',
+    body: '描述（可选）',
     pickSource: '请选择来源分支',
     merged: '已合并请求 {iid}',
   },

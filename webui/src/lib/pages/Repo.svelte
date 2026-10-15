@@ -7,7 +7,7 @@
   import Requests from '$lib/pages/Requests.svelte'
 
   let { api, repo, onBack }: { api: Api; repo: Repo; onBack: () => void } = $props()
-  let tab = $state<'code' | 'branches' | 'tags' | 'commits' | 'requests'>('code')
+  let tab = $state<'code' | 'branches' | 'tags' | 'revisions' | 'requests'>('code')
   let ref = $state(repo.default_branch || 'main')
   let path = $state('')
   let scope = $state('')
@@ -33,7 +33,7 @@
       if (tab === 'code') await loadTree()
       else if (tab === 'branches') branches = (await api.branches(repo.namespace)).branches ?? []
       else if (tab === 'tags') tags = (await api.tags(repo.namespace)).tags ?? []
-      else if (tab === 'commits') commits = (await api.log(repo.namespace, ref)).commits ?? []
+      else if (tab === 'revisions') commits = (await api.log(repo.namespace, ref)).commits ?? []
     } catch (e) {
       err = String(e)
     }
@@ -119,7 +119,7 @@
 </script>
 
 <div class="mb-3 flex items-center gap-2">
-  <button onclick={onBack} class="text-meta text-muted-foreground hover:text-foreground">← {i18n.t('repo.back')}</button>
+  <button onclick={onBack} class="text-meta text-muted-foreground hover:text-foreground">← {i18n.t('ns.back')}</button>
   <h2 class="text-body font-semibold">{repo.namespace}</h2>
   <Badge variant="muted"><GitBranch class="mr-1 size-3" />{ref}</Badge>
   {#if meta.visibility}<Badge variant="muted">{meta.visibility}</Badge>{/if}
@@ -127,7 +127,7 @@
 {#if meta.description}<p class="mb-3 text-meta text-muted-foreground">{meta.description}</p>{/if}
 
 <div class="mb-4 flex items-center gap-2 rounded-md border border-border bg-secondary px-3 py-1.5">
-  <span class="text-micro text-muted-foreground">{i18n.t('repo.clone')}</span>
+  <span class="text-micro text-muted-foreground">{i18n.t('ns.clone')}</span>
   <code class="truncate font-mono text-micro">git clone {cloneUrl}</code>
   <button onclick={() => copy(`git clone ${cloneUrl}`)} class="ml-auto text-muted-foreground hover:text-foreground">
     {#if copied === `git clone ${cloneUrl}`}<Check class="size-3.5 text-success" />{:else}<Copy class="size-3.5" />{/if}
@@ -135,10 +135,10 @@
 </div>
 
 <nav class="mb-4 flex gap-1">
-  {#each [['code', FileIcon], ['branches', GitBranch], ['tags', Tag], ['commits', GitCommitHorizontal], ['requests', GitPullRequest]] as [id, Icon] (id)}
+  {#each [['code', FileIcon], ['branches', GitBranch], ['tags', Tag], ['revisions', GitCommitHorizontal], ['requests', GitPullRequest]] as [id, Icon] (id)}
     <button onclick={() => (tab = id as typeof tab)}
       class="flex items-center gap-1.5 rounded-md border px-3 py-1 text-meta {tab === id ? 'border-primary text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}">
-      <Icon class="size-3.5" />{i18n.t(('tabs.' + id) as 'tabs.code')}
+      <Icon class="size-3.5" />{i18n.t(('tabs.' + (id === 'commits' ? 'revisions' : id)) as 'tabs.code')}
     </button>
   {/each}
 </nav>
@@ -147,15 +147,15 @@
 
 {#if tab === 'code'}
   <div class="mb-3 flex items-center gap-2">
-    <span class="text-micro text-muted-foreground">{i18n.t('repo.scope')}</span>
-    <input value={scope} onchange={(e) => setScope((e.target as HTMLInputElement).value)} placeholder={i18n.t('repo.scopePlaceholder')} class="h-8 w-64 rounded-md border border-input bg-secondary px-2 font-mono text-micro" />
+    <span class="text-micro text-muted-foreground">{i18n.t('ns.scope')}</span>
+    <input value={scope} onchange={(e) => setScope((e.target as HTMLInputElement).value)} placeholder={i18n.t('ns.scopePlaceholder')} class="h-8 w-64 rounded-md border border-input bg-secondary px-2 font-mono text-micro" />
   </div>
   <div class="grid gap-4" style="grid-template-columns: 220px minmax(0, 1fr);">
     <aside class="overflow-hidden rounded-lg border border-border bg-card">
       <div class="border-b border-border px-3 py-2 text-micro font-medium">{scope || repo.namespace}</div>
       <div class="p-2">
         {#if path}
-          <button onclick={up} class="mb-1 flex items-center gap-1 text-micro text-primary hover:underline"><ArrowUp class="size-3" /> {i18n.t('repo.up')}</button>
+          <button onclick={up} class="mb-1 flex items-center gap-1 text-micro text-primary hover:underline"><ArrowUp class="size-3" /> {i18n.t('ns.up')}</button>
         {/if}
         {#each entries as e (e.path)}
           <button onclick={() => open(e)} class="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-micro hover:bg-secondary {e.path === path ? 'text-foreground' : 'text-muted-foreground'}">
@@ -175,7 +175,7 @@
             {/each}
             <span>{path.split('/').pop()}</span>
             <span class="ml-auto">{fmtSize(blob.size)}</span>
-            {#if blob.conflict}<Badge variant="destructive">{i18n.t('repo.conflict')}</Badge>{/if}
+            {#if blob.conflict}<Badge variant="destructive">{i18n.t('ns.conflict')}</Badge>{/if}
           </div>
           {#if blob.conflict && conflict}
             <div class="grid gap-3 p-3" style="grid-template-columns: repeat({conflict.terms.length}, minmax(0, 1fr));">
@@ -189,11 +189,11 @@
                   {#if t.kind === 'blob' && t.is_text}
                     <pre class="max-h-96 overflow-auto p-2 font-mono text-micro leading-relaxed">{@html highlight(t.content ?? '', extOf(path))}</pre>
                   {:else if t.kind === 'blob' && t.is_binary}
-                    <p class="p-2 text-micro text-muted-foreground">{i18n.t('repo.binaryFile')} · {fmtSize(t.size ?? 0)} · <a class="text-primary hover:underline" href={conflictObjectUrl(t.sha)}>{i18n.t('repo.download')}</a></p>
+                    <p class="p-2 text-micro text-muted-foreground">{i18n.t('ns.binaryFile')} · {fmtSize(t.size ?? 0)} · <a class="text-primary hover:underline" href={conflictObjectUrl(t.sha)}>{i18n.t('ns.download')}</a></p>
                   {:else if t.kind === 'dir'}
-                    <p class="p-2 text-micro text-muted-foreground">{i18n.t('repo.directory')}: {(t.entries ?? []).join(', ')}</p>
+                    <p class="p-2 text-micro text-muted-foreground">{i18n.t('ns.directory')}: {(t.entries ?? []).join(', ')}</p>
                   {:else if t.kind === 'absent'}
-                    <p class="p-2 text-micro text-muted-foreground">{i18n.t('repo.deleted')}</p>
+                    <p class="p-2 text-micro text-muted-foreground">{i18n.t('ns.deleted')}</p>
                   {:else}
                     <p class="p-2 text-micro text-muted-foreground">{t.kind}</p>
                   {/if}
@@ -201,13 +201,13 @@
               {/each}
             </div>
             <details class="border-t border-border px-3 py-2">
-              <summary class="cursor-pointer text-micro text-muted-foreground">{i18n.t('repo.markerText')}</summary>
+              <summary class="cursor-pointer text-micro text-muted-foreground">{i18n.t('ns.markerText')}</summary>
               <pre class="mt-2 overflow-auto font-mono text-micro leading-relaxed">{blob.content}</pre>
             </details>
           {:else if blob.is_text}
             <pre class="overflow-auto p-3 font-mono text-meta leading-relaxed">{@html highlight(blob.content ?? '', extOf(path))}</pre>
           {:else}
-            <p class="p-3 text-meta text-muted-foreground">{i18n.t('repo.binaryFile')}</p>
+            <p class="p-3 text-meta text-muted-foreground">{i18n.t('ns.binaryFile')}</p>
           {/if}
         </div>
       {:else if !path && readme}
@@ -241,7 +241,7 @@
     {#each commits as c (c.sha)}
       <li class="flex items-center gap-3 border-b border-border/60 px-3 py-2 last:border-0">
         <span class="font-mono text-micro text-primary">{c.sha.slice(0, 8)}</span>
-        <span class="flex-1 truncate text-meta">{c.message ?? i18n.t('common.none')}</span>
+        <span class="flex-1 truncate text-meta">{c.description ?? c.message ?? i18n.t('common.none')}</span>
         <span class="text-micro text-muted-foreground">{c.author ?? ''}</span>
         <span class="text-micro text-muted-foreground">{when(c.created)}</span>
       </li>

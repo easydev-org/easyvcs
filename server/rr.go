@@ -215,9 +215,13 @@ func (s *Server) handleRRList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	svc := rr.New(s.cs, repo)
 	out := make([]map[string]any, 0, len(list))
 	for _, x := range list {
-		out = append(out, rrView(x))
+		v := rrView(x)
+		// Derive conflicts from the pending merge so the list can flag them.
+		v["conflicts"] = svc.PendingConflicts(x)
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
 }

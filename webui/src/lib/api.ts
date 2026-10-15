@@ -20,6 +20,8 @@ export interface Commit {
   sha: string
   created?: number
   author?: string
+  // The server returns the revision's message as `description`.
+  description?: string
   message?: string
 }
 export interface Ref {
@@ -152,7 +154,7 @@ export class Api {
       body: JSON.stringify(body),
     })
   rrDiff = (ns: string, iid: number) =>
-    this.req<{ diffs: RRDiff[] }>(`/api/v1/namespaces/${ns}/rr/${iid}/diff`)
+    this.req<{ files: RRDiff[] }>(`/api/v1/namespaces/${ns}/rr/${iid}/diff`)
   rrComment = (ns: string, iid: number, body: string, path?: string) =>
     this.req<RR>(`/api/v1/namespaces/${ns}/rr/${iid}/comment`, {
       method: 'POST',

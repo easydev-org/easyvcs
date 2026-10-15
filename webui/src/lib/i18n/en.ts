@@ -1,9 +1,9 @@
-// English dictionary. It is the SCHEMA: `zh` must have exactly these keys (see
-// index.ts), so a missing/extra translation is a COMPILE error.
+// English dictionary — the SCHEMA (see index.ts). Uses easyvcs's NATIVE
+// vocabulary: a namespace is the container; the old "repository" is a ?path=
+// scope; a change is a revision; collaboration is a Revision Request.
 export const en = {
   common: {
     connect: 'Connect',
-    cancel: 'Cancel',
     create: 'Create',
     close: 'Close',
     merge: 'Merge',
@@ -11,19 +11,18 @@ export const en = {
     loading: 'loading…',
     none: 'none',
     noChanges: 'no changes',
-    repositories: 'repositories',
-    tokenPlaceholder: 'token (for private repos / admin)',
+    tagline: 'revision-native version control',
+    tokenPlaceholder: 'token (private namespaces / admin)',
     language: 'Language',
   },
   nav: {
-    repos: 'repositories',
+    namespaces: 'namespaces',
     users: 'users',
   },
-  repos: {
-    title: 'namespaces',
+  namespaces: {
     filter: 'Filter namespaces',
     new: 'New namespace',
-    namespace: 'namespace',
+    label: 'namespace',
     visibility: 'visibility',
     privateLabel: 'private',
     publicLabel: 'public',
@@ -31,7 +30,7 @@ export const en = {
     created: 'created {ns}',
     count: '{n} namespaces',
   },
-  repo: {
+  ns: {
     back: 'namespaces',
     clone: 'clone',
     up: 'up',
@@ -44,19 +43,17 @@ export const en = {
     directory: 'directory',
     deleted: '(deleted)',
     use: 'use',
-    ways: 'ways',
   },
   tabs: {
     code: 'code',
     branches: 'branches',
     tags: 'tags',
-    commits: 'commits',
-    requests: 'requests',
+    revisions: 'revisions',
+    requests: 'revision requests',
   },
-  requests: {
-    title: 'revision requests',
+  rr: {
     none: 'no revision requests',
-    back: 'requests',
+    back: 'revision requests',
     source: 'source',
     conflictsAt: 'Conflicts',
     mergeAnyway: 'Merge anyway (keep conflicts)',
@@ -66,11 +63,11 @@ export const en = {
     comments: 'Comments',
     noComments: 'no comments',
     addComment: 'add a comment',
-    newRequest: 'New request',
+    new: 'New revision request',
     sourceBranch: 'source branch',
     targetBranch: 'target branch',
-    titleLabel: 'title',
-    bodyOptional: 'description (optional)',
+    title: 'title',
+    body: 'description (optional)',
     pickSource: 'pick a source branch',
     merged: 'merged request {iid}',
   },
