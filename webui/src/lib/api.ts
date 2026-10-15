@@ -72,6 +72,18 @@ export interface RR {
   comments?: { id: number; body: string; path?: string; created: number }[]
   merged_by?: number | null
 }
+export interface CommitMeta {
+  revision_id: string
+  sha: string
+  tree?: string
+  parents?: string[]
+  description?: string
+  author?: string
+  session?: string
+  time?: number
+  conflicted?: boolean
+  conflicts?: string[]
+}
 export interface RRDiff {
   path: string
   status: string
@@ -123,7 +135,15 @@ export class Api {
     )
   objectUrl = (ns: string, sha: string) =>
     `/api/v1/namespaces/${ns}/object?` + new URLSearchParams({ sha })
+  // Revision/snapshot metadata (author, message, parents, conflicted, conflicts).
+  commit = (ns: string, sha: string) =>
+    this.req<CommitMeta>(`/api/v1/namespaces/${ns}/commit/${sha}`)
+  // Line diff between two refs (unified per-file content).
+  diff = (ns: string, base: string, head: string) =>
+    this.req<{ files: RRDiff[] }>(`/api/v1/namespaces/${ns}/diff?` + new URLSearchParams({ base, head }))
   branches = (ns: string) => this.req<{ branches: Ref[] }>(`/api/v1/namespaces/${ns}/branches`)
+  deleteBranch = (ns: string, branch: string) =>
+    this.req<unknown>(`/api/v1/namespaces/${ns}/branches/${branch}`, { method: 'DELETE' })
   tags = (ns: string) => this.req<{ tags: Ref[] }>(`/api/v1/namespaces/${ns}/tags`)
   users = () => this.req<{ users: User[] }>('/api/v1/users')
   createUser = (username: string) =>

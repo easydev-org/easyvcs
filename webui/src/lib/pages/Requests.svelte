@@ -2,67 +2,52 @@
   import { GitPullRequest, MessageSquare } from '@lucide/svelte'
   import Button from '$lib/components/ui/button.svelte'
   import Badge from '$lib/components/ui/badge.svelte'
-  import type { Api, Repo, RR, RRDiff, ConflictView } from '$lib/api'
+  import Skeleton from '$lib/components/ui/skeleton.svelte'
+  import Confirm from '$lib/components/ui/confirm.svelte'
+  import type { Api, RR, RRDiff, ConflictView } from '$lib/api'
   import { i18n } from '$lib/i18n/store.svelte'
+  import { router } from '$lib/router.svelte'
+  import { toasts } from '$lib/toast.svelte'
   import { parseUnified, highlight, extOf } from '$lib/diff'
+  import { renderMarkdown } from '$lib/markdown'
 
-  let { api, repo }: { api: Api; repo: Repo } = $props()
+  let { api, ns, iid }: { api: Api; ns: string; iid: string } = $props()
   let list = $state<RR[]>([])
   let open = $state<RR | null>(null)
   let diffs = $state<RRDiff[]>([])
   let comment = $state('')
   let err = $state('')
-  let msg = $state('')
+  let loading = $state(false)
   let conflictViews = $state<Record<string, ConflictView>>({})
   let creating = $state(false)
   let branches = $state<{ name: string; sha?: string }[]>([])
   let form = $state({ source: '', target: 'main', title: '', body: '' })
+  let confirmClose = $state(false)
 
   async function load() {
     err = ''
+    loading = true
     try {
-      list = (await api.rrList(repo.namespace)).requests ?? []
-      branches = (await api.branches(repo.namespace)).branches ?? []
+      list = (await api.rrList(ns)).requests ?? []
+      branches = (await api.branches(ns)).branches ?? []
       if (!form.target) form.target = branches[0]?.name ?? 'main'
     } catch (e) {
       err = String(e)
+    } finally {
+      loading = false
     }
   }
-  // A branch's tip snapshot hash is the RR source. (A real flow would upload a
-  // sandbox snapshot first; here we propose an existing branch tip.)
-  function sourceSha(name: string): string {
-    return branches.find((b) => b.name === name)?.sha ?? ''
-  }
-  async function create() {
+  async function show(n: number) {
     err = ''
-    const src = sourceSha(form.source)
-    if (!src) {
-      err = i18n.t('rr.pickSource')
-      return
-    }
+    loading = true
     try {
-      const r = await api.rrCreate(repo.namespace, {
-        source_snapshot: src,
-        target_branch: form.target,
-        title: form.title,
-        body: form.body,
-      })
-      creating = false
-      form = { source: '', target: 'main', title: '', body: '' }
-      await load()
-      await show(r.iid)
-    } catch (e) {
-      err = String(e)
-    }
-  }
-  async function show(iid: number) {
-    err = ''
-    try {
-      open = await api.rrGet(repo.namespace, iid)
-      diffs = (await api.rrDiff(repo.namespace, iid)).files ?? []
+      open = await api.rrGet(ns, n)
+      diffs = (await api.rrDiff(ns, n)).files ?? []
       await loadConflicts()
     } catch (e) {
       err = String(e)
+    } finally {
+      loading = false
     }
   }
   async function loadConflicts() {
@@ -70,76 +55,105 @@
     if (!open?.pending_revision) return
     for (const p of open.conflicts ?? []) {
       try {
-        conflictViews[p] = await api.conflict(repo.namespace, open.pending_revision!, p)
+        conflictViews[p] = await api.conflict(ns, open.pending_revision!, p)
       } catch {}
     }
   }
+  function select(i: number) {
+    router.navigate({ ns, iid: String(i) })
+  }
+  function back() {
+    router.navigate({ ns, iid: '' })
+  }
   async function resolve(path: string, side: number) {
     if (!open) return
-    err = ''
     try {
-      await api.rrResolve(repo.namespace, open.iid, path, { side })
+      await api.rrResolve(ns, open.iid, path, { side })
+      toasts.success(i18n.t('rr.resolved'))
       await show(open.iid)
     } catch (e) {
-      err = String(e)
+      toasts.error(String(e))
     }
   }
   async function doComment() {
     if (!open || !comment.trim()) return
     try {
-      open = await api.rrComment(repo.namespace, open.iid, comment.trim())
+      open = await api.rrComment(ns, open.iid, comment.trim())
       comment = ''
     } catch (e) {
-      err = String(e)
+      toasts.error(String(e))
     }
   }
   async function doReview(state: string) {
     if (!open) return
     try {
-      open = await api.rrReview(repo.namespace, open.iid, state, '')
+      open = await api.rrReview(ns, open.iid, state, '')
+      toasts.success(i18n.t('rr.reviewed'))
     } catch (e) {
-      err = String(e)
+      toasts.error(String(e))
     }
   }
   async function doMerge(allowConflict = false) {
     if (!open) return
-    err = ''
-    msg = ''
     try {
-      await api.rrMerge(repo.namespace, open.iid, allowConflict)
-      msg = i18n.t('rr.merged', { iid: open.iid })
+      await api.rrMerge(ns, open.iid, allowConflict)
+      toasts.success(i18n.t('rr.merged', { iid: open.iid }))
       await show(open.iid)
       await load()
     } catch (e) {
-      err = String(e)
+      toasts.error(String(e))
     }
   }
   async function doClose() {
     if (!open) return
+    confirmClose = false
     try {
-      open = await api.rrClose(repo.namespace, open.iid)
+      open = await api.rrClose(ns, open.iid)
       await load()
     } catch (e) {
-      err = String(e)
+      toasts.error(String(e))
+    }
+  }
+  function sourceSha(name: string): string {
+    return branches.find((b) => b.name === name)?.sha ?? ''
+  }
+  async function create() {
+    const src = sourceSha(form.source)
+    if (!src) {
+      toasts.error(i18n.t('rr.pickSource'))
+      return
+    }
+    try {
+      const r = await api.rrCreate(ns, { source_snapshot: src, target_branch: form.target, title: form.title, body: form.body })
+      creating = false
+      form = { source: '', target: 'main', title: '', body: '' }
+      await load()
+      select(r.iid)
+    } catch (e) {
+      toasts.error(String(e))
     }
   }
   $effect(() => {
-    repo.namespace
+    ns
     load()
+  })
+  $effect(() => {
+    const n = iid
+    if (n) show(Number(n))
+    else open = null
   })
   const when = (ms: number) => new Date(ms).toLocaleString()
   const parsed = (d: RRDiff) => parseUnified(d.content ?? '', d.path, d.status, false, d.added, d.removed)
 </script>
 
-{#if err}<p class="mb-3 text-meta text-destructive">{err}</p>{/if}
-{#if msg}<p class="mb-3 text-meta text-success">{msg}</p>{/if}
+{#if err}<p class="mb-3 text-meta text-destructive">{i18n.t('common.error')}: {err}</p>{/if}
 
 {#if !open}
   <div class="mb-3 flex items-center">
     <Button onclick={() => (creating = !creating)}>{i18n.t('rr.new')}</Button>
   </div>
   {#if creating}
-    <div class="mb-4 grid gap-2 rounded-lg border border-border bg-card p-4" style="grid-template-columns: 1fr 1fr;">
+    <div class="mb-4 grid gap-2 rounded-lg border border-border bg-card p-4 sm:grid-cols-2">
       <label class="text-micro text-muted-foreground">{i18n.t('rr.sourceBranch')}
         <select bind:value={form.source} class="mt-1 block h-8 w-full rounded-md border border-input bg-secondary px-2 text-meta">
           <option value="">—</option>
@@ -151,43 +165,47 @@
           {#each branches as b (b.name)}<option value={b.name}>{b.name}</option>{/each}
         </select>
       </label>
-      <label class="text-micro text-muted-foreground" style="grid-column: 1 / -1;">{i18n.t('rr.title')}
+      <label class="text-micro text-muted-foreground sm:col-span-2">{i18n.t('rr.title')}
         <input bind:value={form.title} class="mt-1 block h-8 w-full rounded-md border border-input bg-secondary px-2 text-meta" />
       </label>
-      <label class="text-micro text-muted-foreground" style="grid-column: 1 / -1;">{i18n.t('rr.body')}
+      <label class="text-micro text-muted-foreground sm:col-span-2">{i18n.t('rr.body')}
         <input bind:value={form.body} class="mt-1 block h-8 w-full rounded-md border border-input bg-secondary px-2 text-meta" />
       </label>
-      <div style="grid-column: 1 / -1;"><Button onclick={create}>{i18n.t('common.create')}</Button></div>
+      <div class="sm:col-span-2"><Button onclick={create}>{i18n.t('common.create')}</Button></div>
     </div>
   {/if}
-  <div class="overflow-hidden rounded-lg border border-border bg-card">
-    <table class="w-full border-collapse"><tbody>
-      {#each list as r (r.iid)}
-        <tr class="border-b border-border/60 last:border-0 hover:bg-secondary">
-          <td class="px-3 py-2">
-            <button onclick={() => show(r.iid)} class="flex items-center gap-2 text-meta hover:underline">
-              <GitPullRequest class="size-3.5 text-muted-foreground" />
-              <span class="font-mono text-micro text-muted-foreground">#{r.iid}</span>
-              <span class="font-medium">{r.title}</span>
-            </button>
-          </td>
-          <td class="px-3 py-2 text-micro text-muted-foreground">{r.target_branch}</td>
-          <td class="px-3 py-2 text-right">
-            <Badge variant="muted">{r.state}</Badge>
-            {#if r.conflicts && r.conflicts.length}<Badge variant="destructive">{i18n.t('ns.conflict')}</Badge>{/if}
-          </td>
-        </tr>
-      {/each}
-      {#if list.length === 0}<tr><td class="px-3 py-3 text-meta text-muted-foreground">{i18n.t('rr.none')}</td></tr>{/if}
-    </tbody></table>
-  </div>
+  {#if loading}
+    <div class="rounded-lg border border-border bg-card p-4"><Skeleton lines={4} /></div>
+  {:else}
+    <div class="overflow-hidden rounded-lg border border-border bg-card">
+      <table class="w-full border-collapse"><tbody>
+        {#each list as r (r.iid)}
+          <tr class="border-b border-border/60 last:border-0 hover:bg-secondary">
+            <td class="px-3 py-2">
+              <button onclick={() => select(r.iid)} class="flex items-center gap-2 text-meta hover:underline">
+                <GitPullRequest class="size-3.5 shrink-0 text-muted-foreground" />
+                <span class="font-mono text-micro text-muted-foreground">#{r.iid}</span>
+                <span class="truncate font-medium">{r.title}</span>
+              </button>
+            </td>
+            <td class="hidden px-3 py-2 text-micro text-muted-foreground sm:table-cell">{r.target_branch}</td>
+            <td class="px-3 py-2 text-right">
+              <Badge variant="muted">{r.state}</Badge>
+              {#if r.conflicts && r.conflicts.length}<Badge variant="destructive">{i18n.t('ns.conflict')}</Badge>{/if}
+            </td>
+          </tr>
+        {/each}
+        {#if list.length === 0}<tr><td class="px-3 py-3 text-meta text-muted-foreground">{i18n.t('rr.none')}</td></tr>{/if}
+      </tbody></table>
+    </div>
+  {/if}
 {:else}
-  <div class="mb-3 flex items-center gap-2">
-    <button onclick={() => (open = null)} class="text-meta text-muted-foreground hover:text-foreground">← {i18n.t('rr.back')}</button>
+  <div class="mb-3 flex flex-wrap items-center gap-2">
+    <button onclick={back} class="text-meta text-muted-foreground hover:text-foreground">← {i18n.t('rr.back')}</button>
     <h2 class="text-body font-semibold">#{open.iid} {open.title}</h2>
     <Badge variant="muted">{open.state}</Badge>
   </div>
-  {#if open.body}<p class="mb-3 text-meta text-muted-foreground">{open.body}</p>{/if}
+  {#if open.body}<div class="mb-3 text-meta text-muted-foreground">{@html renderMarkdown(open.body)}</div>{/if}
   <p class="mb-3 font-mono text-micro text-muted-foreground">{i18n.t('rr.source')} {open.source_snapshot.slice(0, 12)} → {open.target_branch}</p>
 
   {#if open.conflicts && open.conflicts.length}
@@ -198,7 +216,7 @@
         <div class="mb-2 rounded-md border border-border bg-card p-2">
           <div class="mb-1 font-mono text-micro">{cp}</div>
           {#if cv}
-            <div class="grid gap-2" style="grid-template-columns: repeat({cv.terms.length}, minmax(0, 1fr));">
+            <div class="grid gap-2" style="grid-template-columns: repeat({Math.min(cv.terms.length, 3)}, minmax(0, 1fr));">
               {#each cv.terms as t (t.role + ':' + t.sha)}
                 <div class="overflow-hidden rounded border border-border">
                   <div class="flex items-center gap-1 border-b border-border bg-secondary px-2 py-1 text-micro">
@@ -216,22 +234,18 @@
                 </div>
               {/each}
             </div>
-          {:else}
-            <p class="text-micro text-muted-foreground">{i18n.t('common.loading')}</p>
-          {/if}
+          {:else}<p class="text-micro text-muted-foreground">{i18n.t('common.loading')}</p>{/if}
         </div>
       {/each}
-      <div class="mt-2 flex gap-2">
-        <Button onclick={() => doMerge(true)}>{i18n.t('rr.mergeAnyway')}</Button>
-      </div>
+      <div class="mt-2 flex gap-2"><Button onclick={() => doMerge(true)}>{i18n.t('rr.mergeAnyway')}</Button></div>
     </div>
   {/if}
 
-  <div class="mb-3 flex gap-2">
+  <div class="mb-3 flex flex-wrap gap-2">
     <Button onclick={() => doMerge(false)}>{i18n.t('common.merge')}</Button>
     <Button onclick={() => doReview('approved')}>{i18n.t('rr.approve')}</Button>
     <Button onclick={() => doReview('request_changes')}>{i18n.t('rr.requestChanges')}</Button>
-    <Button onclick={doClose}>{i18n.t('common.close')}</Button>
+    <Button onclick={() => (confirmClose = true)}>{i18n.t('common.close')}</Button>
   </div>
 
   <h3 class="mb-2 text-meta font-medium">{i18n.t('rr.diff')}</h3>
@@ -239,16 +253,14 @@
     {#each diffs as d (d.path)}
       {@const pf = parsed(d)}
       <div class="border-b border-border/60 last:border-0">
-        <div class="flex items-center gap-2 border-b border-border bg-secondary px-3 py-1.5 text-micro">
-          <span class="font-mono">{d.path}</span>
-          <Badge variant="muted">{d.status}</Badge>
+        <div class="flex flex-wrap items-center gap-2 border-b border-border bg-secondary px-3 py-1.5 text-micro">
+          <span class="font-mono">{d.path}</span><Badge variant="muted">{d.status}</Badge>
           <span class="text-success">+{d.added}</span><span class="text-destructive">-{d.removed}</span>
         </div>
         {#if pf.lines.length}
           <div class="overflow-auto font-mono text-micro leading-relaxed">
             {#each pf.lines as ln, i (i)}
-              {#if ln.kind === 'hunk'}
-                <div class="bg-secondary/60 px-3 py-0.5 text-muted-foreground">{ln.text}</div>
+              {#if ln.kind === 'hunk'}<div class="bg-secondary/60 px-3 py-0.5 text-muted-foreground">{ln.text}</div>
               {:else}
                 <div class="flex {ln.kind === 'add' ? 'bg-success/10' : ln.kind === 'del' ? 'bg-destructive/10' : ''}">
                   <span class="w-10 shrink-0 select-none px-1 text-right text-muted-foreground">{ln.oldNo ?? ''}</span>
@@ -259,9 +271,7 @@
               {/if}
             {/each}
           </div>
-        {:else}
-          <p class="px-3 py-2 text-meta text-muted-foreground">{i18n.t('common.noChanges')}</p>
-        {/if}
+        {:else}<p class="px-3 py-2 text-meta text-muted-foreground">{i18n.t('common.noChanges')}</p>{/if}
       </div>
     {/each}
     {#if diffs.length === 0}<p class="px-3 py-3 text-meta text-muted-foreground">{i18n.t('common.noChanges')}</p>{/if}
@@ -271,8 +281,8 @@
   <ul class="mb-2 overflow-hidden rounded-lg border border-border bg-card">
     {#each open.comments ?? [] as c (c.id)}
       <li class="flex items-start gap-2 border-b border-border/60 px-3 py-2 last:border-0 text-meta">
-        <MessageSquare class="mt-0.5 size-3.5 text-muted-foreground" />
-        <span class="flex-1">{c.body}{#if c.path}<span class="text-micro text-muted-foreground"> @ {c.path}</span>{/if}</span>
+        <MessageSquare class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+        <span class="min-w-0 flex-1">{@html renderMarkdown(c.body)}{#if c.path}<span class="text-micro text-muted-foreground"> @ {c.path}</span>{/if}</span>
         <span class="text-micro text-muted-foreground">{when(c.created)}</span>
       </li>
     {/each}
@@ -282,4 +292,8 @@
     <input bind:value={comment} placeholder={i18n.t('rr.addComment')} class="h-8 flex-1 rounded-md border border-input bg-secondary px-2 text-meta" />
     <Button onclick={doComment}>{i18n.t('common.comment')}</Button>
   </div>
+
+  {#if confirmClose}
+    <Confirm title={i18n.t('common.close')} message={i18n.t('rr.confirmClose')} onconfirm={doClose} oncancel={() => (confirmClose = false)} />
+  {/if}
 {/if}

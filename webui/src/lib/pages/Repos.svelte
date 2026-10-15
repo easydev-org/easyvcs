@@ -4,6 +4,7 @@
   import Button from '$lib/components/ui/button.svelte'
   import type { Api, Repo } from '$lib/api'
   import { i18n } from '$lib/i18n/store.svelte'
+  import { toasts } from '$lib/toast.svelte'
 
   let { api, onOpen }: { api: Api; onOpen: (r: Repo) => void } = $props()
   let repos = $state<Repo[]>([])
@@ -11,9 +12,9 @@
   let creating = $state(false)
   let form = $state({ ns: '', visibility: 'private', init: true })
   let err = $state('')
-  let msg = $state('')
 
   async function load() {
+    err = ''
     try {
       repos = (await api.repos()).repos ?? []
     } catch (e) {
@@ -24,21 +25,19 @@
   const shown = $derived(repos.filter((r) => r.namespace.toLowerCase().includes(q.toLowerCase())))
   async function create() {
     err = ''
-    msg = ''
     try {
       await api.createRepo(form.ns.trim(), { visibility: form.visibility, init: form.init })
-      msg = i18n.t('namespaces.created', { ns: form.ns.trim() })
+      toasts.success(i18n.t('namespaces.created', { ns: form.ns.trim() }))
       creating = false
       form = { ns: '', visibility: 'private', init: true }
       await load()
     } catch (e) {
-      err = String(e)
+      toasts.error(String(e))
     }
   }
 </script>
 
 {#if err}<p class="mb-3 text-meta text-destructive">{err}</p>{/if}
-{#if msg}<p class="mb-3 text-meta text-success">{msg}</p>{/if}
 <div class="mb-4 flex items-center gap-2">
   <div class="flex h-8 items-center gap-2 rounded-md border border-input bg-secondary px-3">
     <Search class="size-3.5 text-muted-foreground" />

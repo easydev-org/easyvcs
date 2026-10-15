@@ -5,6 +5,7 @@
   import Badge from '$lib/components/ui/badge.svelte'
   import type { Api, User } from '$lib/api'
   import { i18n } from '$lib/i18n/store.svelte'
+  import { toasts } from '$lib/toast.svelte'
 
   let { api }: { api: Api } = $props()
   let users = $state<User[]>([])
@@ -28,6 +29,7 @@
       const r = await api.createUser(name)
       newToken = r.token ?? ''
       name = ''
+      toasts.success(i18n.t('users.created'))
       await load()
     } catch (e) {
       err = String(e)
@@ -42,7 +44,11 @@
   }
 </script>
 
-{#if err}<p class="mb-3 text-meta text-destructive">{err}</p>{/if}
+{#if err}
+  <div class="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-meta text-destructive">
+    {i18n.t('users.adminOnly')} <span class="text-micro text-muted-foreground">({err})</span>
+  </div>
+{/if}
 {#if newToken}
   <div class="mb-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-4 py-3">
     <span class="text-meta text-success">{i18n.t('users.newToken')}</span>
