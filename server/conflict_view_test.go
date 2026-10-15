@@ -113,3 +113,65 @@ func TestConflictViewBinaryAndObject(t *testing.T) {
 	_ = base64.StdEncoding
 	_ = httptest.NewRequest
 }
+
+// TestConflictIsSnapshotProperty pins the model: a conflicted merge does NOT put
+// the RR into a "conflicted" state (it stays open); the conflict is a property
+// of the pending merge SNAPSHOT, surfaced via the commit view and the RR view.
+func TestConflictIsSnapshotProperty(t *testing.T) {
+	s := newTestServer(t, "secret")
+	u, _ := s.cs.GetUserByUsername("tester")
+	repo, _ := s.cs.Create(store.NSRef{Owner: u.ID, Name: "team-app"})
+	makePublic(t, repo)
+	ws := revision.NewWorkspace(repo)
+	write := func(c string) object.ID {
+		tr := object.NewTree()
+		b, _ := ws.WriteBlob([]byte(c))
+		tr.Entries["f.txt"] = object.Entry{Name: "f.txt", Kind: object.KindBlob, ID: b}
+		id, _ := ws.WriteTree(tr)
+		return id
+	}
+	baseRev, _, _ := ws.Commit(revision.CommitParams{TreeID: write("a\nb\nc\n"), Description: "base", Author: store.Author{Name: "t"}})
+	_, _ = ws.SetRef("main", store.RefBranch, baseRev.RevisionID)
+	src, _, _ := ws.Commit(revision.CommitParams{Parents: []object.ID{baseRev.RevisionHash}, TreeID: write("a\nOURS\nc\n"), Description: "ours", Author: store.Author{Name: "t"}})
+	adv, _, _ := ws.Commit(revision.CommitParams{Parents: []object.ID{baseRev.RevisionHash}, TreeID: write("a\nTHEIRS\nc\n"), Description: "theirs", Author: store.Author{Name: "t"}})
+	_, _ = ws.SetRef("main", store.RefBranch, adv.RevisionID)
+
+	svc := rr.New(s.cs, repo)
+	req, _ := svc.Create(rr.Source{Snapshot: src.RevisionHash}, "main", "c", "", nil)
+	res, err := svc.ApplyMerge(req, store.Author{Name: "t"}, nil)
+	if err != nil || res.Clean {
+		t.Fatalf("expected conflicted merge: %v clean=%v", err, res.Clean)
+	}
+	// The RR stays OPEN (no "conflicted" state).
+	got, _ := s.cs.GetRevisionRequest(repo.NamespaceID(), req.IID)
+	if got.State != store.RROpen {
+		t.Fatalf("state = %s, want open", got.State)
+	}
+	// The pending merge revision's SNAPSHOT is conflicted — via the commit view.
+	mux := s.Router()
+	rec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/commit/"+res.MergedRevisionID, "secret", nil)
+	if rec.Code != 200 {
+		t.Fatalf("commit view: %d %s", rec.Code, rec.Body.String())
+	}
+	body := decode(t, rec)
+	if body["conflicted"] != true {
+		t.Fatalf("snapshot should be conflicted: %v", body)
+	}
+	cf, _ := body["conflicts"].([]any)
+	if len(cf) != 1 || cf[0] != "f.txt" {
+		t.Fatalf("snapshot conflicts = %v", cf)
+	}
+	// And the RR view derives the same conflicts.
+	rec = hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/rr/"+itoa(req.IID), "secret", nil)
+	if rec.Code != 200 {
+		t.Fatalf("rr view: %d", rec.Code)
+	}
+	rv := decode(t, rec)
+	if rv["state"] != "open" {
+		t.Fatalf("rr state = %v, want open", rv["state"])
+	}
+	rc, _ := rv["conflicts"].([]any)
+	if len(rc) != 1 || rc[0] != "f.txt" {
+		t.Fatalf("rr conflicts = %v, want [f.txt]", rc)
+	}
+}

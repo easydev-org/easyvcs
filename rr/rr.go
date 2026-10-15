@@ -365,9 +365,11 @@ func (s *Service) ApplyMerge(rr *store.RevisionRequest, merger store.Author, mer
 // always, and a conflicted one only when AllowConflict is set (so a partially
 // resolved pending merge can be landed). Otherwise it recomputes.
 //
-// On conflicts it records the pending merge and marks the RR conflicted (the
-// conflict objects stay in the tree; nothing is rolled back) — UNLESS
-// AllowConflict is set, in which case the conflicted merge is landed on the
+// On conflicts it records the PENDING merge (the conflict objects stay in the
+// tree; nothing is rolled back) and LEAVES THE REQUEST OPEN — a conflict is a
+// property of the merge snapshot, not of the request. The pending merge's
+// conflicts are surfaced via the RR view (and GET .../commit/{sha} for the
+// pending revision). With AllowConflict the conflicted merge is landed on the
 // target and the RR marked merged.
 func (s *Service) ApplyMergeOpts(rr *store.RevisionRequest, merger store.Author, mergedBy *int64, opts MergeOptions) (MergeResult, error) {
 	// Adopt an existing pending merge when Resolve has produced one.
@@ -389,10 +391,9 @@ func (s *Service) ApplyMergeOpts(rr *store.RevisionRequest, merger store.Author,
 		return res, err
 	}
 	if !res.Clean && !opts.AllowConflict {
+		// Record the pending (conflicted) merge; the RR stays OPEN. The conflict
+		// is a property of the pending merge snapshot, not a request state.
 		if err := s.cs.PutRRMerge(rr.ID, res.MergedSnapshot.String(), res.MergedRevisionID, "pending", mergedBy); err != nil {
-			return res, err
-		}
-		if err := s.cs.UpdateRevisionRequestState(rr.NamespaceID, rr.IID, store.RRConflicted); err != nil {
 			return res, err
 		}
 		return res, nil
@@ -423,6 +424,19 @@ func (s *Service) pendingMerge(rr *store.RevisionRequest) (*MergeResult, error) 
 		res.Clean = len(atoms) == 0
 	}
 	return res, nil
+}
+
+// PendingConflicts returns the conflicted paths of the RR's PENDING merge (the
+// merge computed but not yet landed), or nil when there is no pending merge or
+// it is conflict-free. This is how a client learns an RR is "conflicted" now
+// that it is no longer a request STATE: the conflict lives on the pending merge
+// snapshot.
+func (s *Service) PendingConflicts(rr *store.RevisionRequest) []string {
+	res, err := s.pendingMerge(rr)
+	if err != nil || res == nil {
+		return nil
+	}
+	return res.Conflicts
 }
 
 // finishMerge moves the target ref to the merge revision and records the RR as
@@ -557,8 +571,12 @@ func (s *Service) resolveWith(rr *store.RevisionRequest, path string, merger sto
 		return nil, err
 	}
 	if len(remaining) == 0 {
-		if err := s.cs.UpdateRevisionRequestState(rr.NamespaceID, rr.IID, store.RROpen); err != nil {
-			return nil, err
+		// The pending merge is now conflict-free; ensure the RR is open so it can
+		// be merged (it already is — this is idempotent for a legacy row).
+		if rr.State != store.RROpen && rr.State != store.RRStale {
+			if err := s.cs.UpdateRevisionRequestState(rr.NamespaceID, rr.IID, store.RROpen); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return s.cs.GetRevisionRequest(rr.NamespaceID, rr.IID)

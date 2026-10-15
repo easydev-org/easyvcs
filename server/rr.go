@@ -251,7 +251,12 @@ func (s *Server) handleRRGet(w http.ResponseWriter, r *http.Request) {
 	if pm, merr := s.cs.GetRRMerge(x.ID); merr == nil {
 		mergedBy = pm.MergedBy
 	}
-	writeJSON(w, http.StatusOK, rrViewDetail(x, reviews, comments, mergedBy))
+	view := rrViewDetail(x, reviews, comments, mergedBy)
+	// Conflicts are DERIVED from the pending merge, not an RR state.
+	if svc, _, ok := s.rrService(w, r); ok {
+		view["conflicts"] = svc.PendingConflicts(x)
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleRRDiff(w http.ResponseWriter, r *http.Request) {

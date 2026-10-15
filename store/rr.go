@@ -8,13 +8,16 @@ import (
 	"gorm.io/gorm"
 )
 
-// RR states.
+// RR states. There is deliberately NO "conflicted" state: whether a merge has
+// conflicts is a property of the MERGE SNAPSHOT (its tree carries conflict
+// objects), not of the request. A request with a conflicted pending merge stays
+// "open"; its conflicts are DERIVED from the pending merge and surfaced in the
+// RR view (and on the snapshot itself via GET .../commit/{sha}).
 const (
-	RROpen       = "open"
-	RRStale      = "stale"
-	RRConflicted = "conflicted"
-	RRMerged     = "merged"
-	RRClosed     = "closed"
+	RROpen   = "open"
+	RRStale  = "stale"
+	RRMerged = "merged"
+	RRClosed = "closed"
 )
 
 // RevisionRequest is the change-native collaboration unit. Its subject is a
@@ -220,7 +223,7 @@ func (s *CentralStore) GetRRMerge(rrID int64) (*RRMerge, error) {
 // when no branch points at it.
 func (s *CentralStore) ListOpenRRSnapshots() ([]string, error) {
 	var rows []revisionRequestRow
-	if err := s.d.gdb.Where("state IN ?", []string{RROpen, RRStale, RRConflicted}).Find(&rows).Error; err != nil {
+	if err := s.d.gdb.Where("state IN ?", []string{RROpen, RRStale}).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}

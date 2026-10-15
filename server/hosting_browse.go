@@ -296,12 +296,23 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 	for _, p := range snap.Parents {
 		parents = append(parents, p.String())
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	// Conflicts are a property of the SNAPSHOT (its tree carries conflict
+	// objects): expose them here so any client can see whether a snapshot is
+	// conflicted and at which paths, without a separate state machine.
+	out := map[string]any{
 		"revision_id": rev.ID, "sha": snap.RevisionHash.String(), "tree": snap.TreeID.String(),
 		"parents": parents, "description": snap.Description, "author": snap.Author.String(),
 		"session": snap.Author.Session,
 		"time":    snap.CommitTime.UnixMilli(),
-	})
+	}
+	atoms, _ := ws.ConflictsInTree(snap.TreeID)
+	paths := make([]string, 0, len(atoms))
+	for _, a := range atoms {
+		paths = append(paths, a.Path)
+	}
+	out["conflicted"] = len(paths) > 0
+	out["conflicts"] = paths
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {

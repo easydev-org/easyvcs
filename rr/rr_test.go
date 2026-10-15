@@ -387,11 +387,16 @@ func TestConflictAndResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != store.RRConflicted {
-		t.Fatalf("state = %s, want conflicted", got.State)
+	// A conflict is NOT an RR state: the request stays OPEN, and the conflict is
+	// derived from the pending merge.
+	if got.State != store.RROpen {
+		t.Fatalf("state = %s, want open (conflict is a snapshot property, not a state)", got.State)
+	}
+	if c := svc.PendingConflicts(got); len(c) != 1 || c[0] != "f.txt" {
+		t.Fatalf("PendingConflicts = %v, want [f.txt]", c)
 	}
 	// Resolve genuinely (side 0 = the source's own content). After resolving the
-	// only conflict, the request is open and the pending snapshot is clean.
+	// only conflict, the pending snapshot is clean.
 	if _, err := svc.Resolve(got, "f.txt", 0, testAuthor(), testUserID()); err != nil {
 		t.Fatal(err)
 	}
@@ -608,7 +613,11 @@ func TestMergeAllowConflictDefaultStaysPending(t *testing.T) {
 		t.Fatalf("default conflicted merge must NOT move main")
 	}
 	got, _ := cs.GetRevisionRequest(repo.NamespaceID(), req.IID)
-	if got.State != store.RRConflicted {
-		t.Fatalf("state = %s, want conflicted", got.State)
+	// The RR stays OPEN; the conflict is on the pending merge snapshot.
+	if got.State != store.RROpen {
+		t.Fatalf("state = %s, want open", got.State)
+	}
+	if c := svc.PendingConflicts(got); len(c) != 1 || c[0] != "f.txt" {
+		t.Fatalf("PendingConflicts = %v, want [f.txt]", c)
 	}
 }
