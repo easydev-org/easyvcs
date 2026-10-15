@@ -130,9 +130,16 @@ func TestHashIDContext(t *testing.T) {
 	}
 }
 
+// An empty payload is a LEGAL empty blob (a 0-byte file): EncodeObject returns
+// Blob verbatim, so an empty blob encodes to zero bytes and MUST round-trip.
+// (Rejecting it broke snapshots that contain empty files.)
 func TestDecodeObjectEmpty(t *testing.T) {
-	if _, err := DecodeObject(ID{}, nil); err == nil {
-		t.Fatal("expected error for empty payload")
+	o, err := DecodeObject(ID{}, nil)
+	if err != nil {
+		t.Fatalf("empty payload must decode as an empty blob, got error: %v", err)
+	}
+	if o == nil || o.Kind != KindBlob || len(o.Blob) != 0 {
+		t.Fatalf("empty payload must decode as a zero-length blob, got %+v", o)
 	}
 }
 
