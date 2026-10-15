@@ -36,10 +36,15 @@ func (s *Server) handleSubRepo(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	refIDs := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		refIDs = append(refIDs, ref.Target)
+	}
+	refRevs, _ := repo.RevisionsByIDs(refIDs)
 	outRefs := make([]map[string]any, 0)
 	for _, ref := range refs {
-		rev, err := repo.GetRevision(ref.Target)
-		if err != nil {
+		rev, ok := refRevs[ref.Target]
+		if !ok {
 			continue
 		}
 		snap, err := repo.GetSnapshot(rev.Hash)
@@ -69,14 +74,22 @@ func (s *Server) handleSubRepo(w http.ResponseWriter, r *http.Request) {
 		Created    int64
 		entry      map[string]any
 	}
+	revs, _ := repo.RevisionsByIDs(ids)
+	hashes := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if rev, ok := revs[id]; ok {
+			hashes = append(hashes, rev.Hash.String())
+		}
+	}
+	snaps, _ := repo.SnapshotsByHashes(hashes)
 	commits := make([]commitView, 0, len(ids))
 	for _, id := range ids {
-		rev, err := repo.GetRevision(id)
-		if err != nil {
+		rev, ok := revs[id]
+		if !ok {
 			continue
 		}
-		snap, err := repo.GetSnapshot(rev.Hash)
-		if err != nil {
+		snap, ok := snaps[rev.Hash.String()]
+		if !ok {
 			continue
 		}
 		commits = append(commits, commitView{

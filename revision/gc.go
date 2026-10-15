@@ -76,27 +76,38 @@ func GCRun(cs *store.CentralStore, opts GCOptions) (GCResult, error) {
 		}
 	}
 
-	all, err := objectIDsGlobal(cs)
+	repo := firstRepo(cs)
+	if repo == nil {
+		return res, nil
+	}
+	// STREAM the object ids to find the UNREACHABLE set. We must NOT delete while
+	// the stream cursor is open: on SQLite the single connection is held by the
+	// cursor, so a delete would deadlock. Collect first (bounded batches), then
+	// delete. res.Total counts every object seen.
+	//
+	// To bound memory, delete in chunks: accumulate up to gcDeleteChunk ids, then
+	// delete them before resuming the stream — but since the stream holds the
+	// connection, we instead collect ALL unreachable ids (only the DEAD set, not
+	// the whole store, which is the win over ObjectIDs()).
+	var dead []object.ID
+	err = repo.StreamObjectIDs(func(id object.ID) bool {
+		res.Total++
+		if reachable[id.String()] {
+			return true
+		}
+		dead = append(dead, id)
+		return true
+	})
 	if err != nil {
 		return res, err
 	}
-	res.Total = len(all)
-	repo := firstRepo(cs)
-	for _, id := range all {
-		if reachable[id.String()] {
-			continue
-		}
-		if opts.DryRun {
-			res.Swept++
-			continue
-		}
-		// Delete from the shared object store. A failed delete must not be
-		// counted as swept (the report would lie about the store's state).
-		if repo == nil {
-			return res, fmt.Errorf("gc: no repository handle to delete objects from")
-		}
-		if err := repo.DeleteObject(id); err != nil {
-			return res, fmt.Errorf("gc: delete object %s: %w", id, err)
+	if opts.DryRun {
+		res.Swept = len(dead)
+		return res, nil
+	}
+	for _, id := range dead {
+		if derr := repo.DeleteObject(id); derr != nil {
+			return res, fmt.Errorf("gc: delete object %s: %w", id, derr)
 		}
 		res.Swept++
 	}

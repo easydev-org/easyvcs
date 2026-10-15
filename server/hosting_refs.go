@@ -50,13 +50,20 @@ func (s *Server) handleListBranches(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Kind == store.RefBranch {
+			ids = append(ids, ref.Target)
+		}
+	}
+	revs, _ := repo.RevisionsByIDs(ids)
 	out := []map[string]any{}
 	for _, ref := range refs {
 		if ref.Kind != store.RefBranch {
 			continue
 		}
 		entry := refView(ref)
-		if rev, err := repo.GetRevision(ref.Target); err == nil {
+		if rev, ok := revs[ref.Target]; ok {
 			entry["sha"] = rev.Hash.String()
 		}
 		out = append(out, entry)

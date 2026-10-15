@@ -349,11 +349,16 @@ func (w *Workspace) AllSnapshots() (map[string]*store.Snapshot, map[object.ID]st
 	if err != nil {
 		return nil, nil, err
 	}
+	hashes := make([]string, 0, len(revisions))
+	for _, rv := range revisions {
+		hashes = append(hashes, rv.Hash.String())
+	}
+	snaps, _ := w.store.SnapshotsByHashes(hashes)
 	byRevision := map[string]*store.Snapshot{}
 	byID := map[object.ID]string{}
 	for _, rv := range revisions {
-		snap, err := w.store.GetSnapshot(rv.Hash)
-		if err != nil {
+		snap, ok := snaps[rv.Hash.String()]
+		if !ok {
 			continue
 		}
 		byRevision[rv.ID] = snap

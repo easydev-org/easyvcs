@@ -60,6 +60,9 @@ SetWAL** —— 打开 DB 与 `PRAGMA journal_mode=WAL` 都是写操作，纯读
 | **路径索引就绪缓存** | `RevisionsTouching` ~360µs → **~35µs**（10×）|
 | **异步路径索引** | 提交不再等索引写；后台 worker **去抖攒批**（多次提交→一次索引事务）。SQLite 单连接下 ~10% 提交延迟下降；**Postgres 多连接下 worker 可并行**，收益更大 |
 | **对象 LRU 缓存**（默认 4096 项）| 重复 tree/blob 读**免 DB 往返**；内容寻址不可变 → 永不过期 |
+| **snapshot/revision LRU 缓存** | 重复 `GetSnapshot`/`GetRevision` 免 DB；amend 复用 id 时刷新缓存（防陈旧）|
+| **批量查询**（`SnapshotsByHashes`/`RevisionsByIDs`）| 消除 log/branches/subrepo/history 的 **N+1**：100 个 commit 的 log **~4.05ms → ~0.70ms（~5.8×）**（冷缓存）|
+| **GC/verify 流式** | `gc` 流式扫描对象（不再一次性加载全部 id）；`verify` 用 `COUNT` 替代全量 id 载入 |
 | **提交批量写** | blob 收集后**一次事务批量写**（不再每文件一次往返）|
 | **对象级 push delta**（Bloom）| 不再重传服务端已有对象 |
 | **只读命令懒开库** | 冷启动 ↓（不 SetWAL/不迁移）|

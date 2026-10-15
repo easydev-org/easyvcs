@@ -50,11 +50,11 @@ func Verify(cs *store.CentralStore) (VerifyResult, error) {
 			res.MissingObjects += missing
 		}
 	}
-	// Objects present in the global store.
+	// Objects present in the global store: a COUNT, not a full id load (verify
+	// must not pull every object id into memory on a large store).
 	if repo := firstRepo(cs); repo != nil {
-		ids, err := repo.ObjectIDs()
-		if err == nil {
-			res.Objects = len(ids)
+		if n, err := repo.CountObjects(); err == nil {
+			res.Objects = int(n)
 		}
 	}
 	return res, nil

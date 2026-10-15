@@ -170,10 +170,14 @@ type RepoStore interface {
 	// Snapshot access.
 	PutSnapshot(s *Snapshot) error
 	GetSnapshot(id object.ID) (*Snapshot, error)
+	// SnapshotsByHashes fetches many snapshots in one query (map keyed by hex sha).
+	SnapshotsByHashes(hashes []string) (map[string]*Snapshot, error)
 
 	// Revision access.
 	PutRevision(r *Revision) error
 	GetRevision(id string) (*Revision, error)
+	// RevisionsByIDs fetches many revisions in one query (map keyed by id).
+	RevisionsByIDs(ids []string) (map[string]*Revision, error)
 	// UpdateRevisionHash atomically points a revision's Hash to a new
 	// snapshot hash.
 	UpdateRevisionHash(revisionID string, hash object.ID) error

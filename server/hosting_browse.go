@@ -247,13 +247,19 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 	// Newest first, then truncate.
 	sort.Slice(revs, func(i, j int) bool { return revs[i].Created.After(revs[j].Created) })
+	// Truncate first, then fetch all snapshots in ONE query (no N+1).
+	if len(revs) > limit {
+		revs = revs[:limit]
+	}
+	hashes := make([]string, 0, len(revs))
+	for _, rev := range revs {
+		hashes = append(hashes, rev.Hash.String())
+	}
+	snaps, _ := repo.SnapshotsByHashes(hashes)
 	out := make([]map[string]any, 0, len(revs))
-	for i, rev := range revs {
-		if i >= limit {
-			break
-		}
+	for _, rev := range revs {
 		entry := map[string]any{"revision_id": rev.ID, "sha": rev.Hash.String(), "created": rev.Created.UnixMilli()}
-		if snap, err := repo.GetSnapshot(rev.Hash); err == nil {
+		if snap, ok := snaps[rev.Hash.String()]; ok {
 			entry["description"] = snap.Description
 			entry["author"] = snap.Author.String()
 			entry["session"] = snap.Author.Session

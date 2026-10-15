@@ -88,6 +88,39 @@ func (r *Repo) ObjectIDs() ([]object.ID, error) {
 	return out, nil
 }
 
+// StreamObjectIDs iterates every object id in the GLOBAL store without loading
+// them all into memory (rows are streamed via a database cursor). fn returns
+// false to stop early. It lets GC scale to millions of objects.
+func (r *Repo) StreamObjectIDs(fn func(id object.ID) bool) error {
+	rows, err := r.cs.d.gdb.Model(&objectRow{}).Select("sha").Rows()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return err
+		}
+		id, err := object.HexToID(s)
+		if err != nil {
+			continue
+		}
+		if !fn(id) {
+			return nil
+		}
+	}
+	return rows.Err()
+}
+
+// CountObjects returns the number of objects in the global store (a COUNT, not
+// a full id load).
+func (r *Repo) CountObjects() (int64, error) {
+	var n int64
+	err := r.cs.d.gdb.Model(&objectRow{}).Count(&n).Error
+	return n, err
+}
+
 // ObjectExists reports whether an object is present.
 func (r *Repo) ObjectExists(id object.ID) (bool, error) {
 	var count int64

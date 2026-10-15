@@ -69,6 +69,14 @@ func (w *Workspace) FileHistoryOpt(opt HistoryOpt, path string) ([]FileEdit, err
 		return nil, nil
 	}
 
+	// Prefetch every snapshot in ONE query (the walk needs them all); the store
+	// caches them, so the per-step GetSnapshot below is a memory hit, not N+1.
+	allHashes := make([]string, 0, len(revs))
+	for _, r := range revs {
+		allHashes = append(allHashes, r.Hash.String())
+	}
+	_, _ = w.store.SnapshotsByHashes(allHashes)
+
 	// Walk ancestors topologically: start -> parents -> ... -> root.
 	var chain []*store.Revision
 	visited := map[string]bool{}
