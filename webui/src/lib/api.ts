@@ -145,6 +145,12 @@ export class Api {
       `/api/v1/namespaces/${ns}/rr` + (state ? '?' + new URLSearchParams({ state }) : ''),
     )
   rrGet = (ns: string, iid: number) => this.req<RR>(`/api/v1/namespaces/${ns}/rr/${iid}`)
+  rrCreate = (ns: string, body: { source_snapshot: string; target_branch: string; title: string; body?: string }) =>
+    this.req<RR>(`/api/v1/namespaces/${ns}/rr`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
   rrDiff = (ns: string, iid: number) =>
     this.req<{ diffs: RRDiff[] }>(`/api/v1/namespaces/${ns}/rr/${iid}/diff`)
   rrComment = (ns: string, iid: number, body: string, path?: string) =>

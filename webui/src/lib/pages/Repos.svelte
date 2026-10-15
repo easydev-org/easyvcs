@@ -2,8 +2,8 @@
   import { onMount } from 'svelte'
   import { FolderGit2, Lock, Plus, Search } from '@lucide/svelte'
   import Button from '$lib/components/ui/button.svelte'
-  import Input from '$lib/components/ui/input.svelte'
   import type { Api, Repo } from '$lib/api'
+  import { i18n } from '$lib/i18n/store.svelte'
 
   let { api, onOpen }: { api: Api; onOpen: (r: Repo) => void } = $props()
   let repos = $state<Repo[]>([])
@@ -26,11 +26,8 @@
     err = ''
     msg = ''
     try {
-      await api.createRepo(form.ns.trim(), {
-        visibility: form.visibility,
-        init: form.init,
-      })
-      msg = `created ${form.ns.trim()}`
+      await api.createRepo(form.ns.trim(), { visibility: form.visibility, init: form.init })
+      msg = i18n.t('repos.created', { ns: form.ns.trim() })
       creating = false
       form = { ns: '', visibility: 'private', init: true }
       await load()
@@ -45,22 +42,22 @@
 <div class="mb-4 flex items-center gap-2">
   <div class="flex h-8 items-center gap-2 rounded-md border border-input bg-secondary px-3">
     <Search class="size-3.5 text-muted-foreground" />
-    <input bind:value={q} placeholder="Filter namespaces" class="w-56 bg-transparent text-meta outline-none placeholder:text-muted-foreground" />
+    <input bind:value={q} placeholder={i18n.t('repos.filter')} class="w-56 bg-transparent text-meta outline-none placeholder:text-muted-foreground" />
   </div>
-  <Button onclick={() => (creating = !creating)}><Plus class="size-3.5" /> New namespace</Button>
-  <span class="ml-auto text-micro text-muted-foreground">{shown.length} namespaces</span>
+  <Button onclick={() => (creating = !creating)}><Plus class="size-3.5" /> {i18n.t('repos.new')}</Button>
+  <span class="ml-auto text-micro text-muted-foreground">{i18n.t('repos.count', { n: shown.length })}</span>
 </div>
 
 {#if creating}
   <div class="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-card p-4">
-    <label class="text-micro text-muted-foreground">namespace<input bind:value={form.ns} placeholder="team/project" class="mt-1 block h-8 w-56 rounded-md border border-input bg-secondary px-2 text-meta" /></label>
-    <label class="text-micro text-muted-foreground">visibility
+    <label class="text-micro text-muted-foreground">{i18n.t('repos.namespace')}<input bind:value={form.ns} placeholder="team/project" class="mt-1 block h-8 w-56 rounded-md border border-input bg-secondary px-2 text-meta" /></label>
+    <label class="text-micro text-muted-foreground">{i18n.t('repos.visibility')}
       <select bind:value={form.visibility} class="mt-1 block h-8 rounded-md border border-input bg-secondary px-2 text-meta">
-        <option value="private">private</option><option value="public">public</option>
+        <option value="private">{i18n.t('repos.privateLabel')}</option><option value="public">{i18n.t('repos.publicLabel')}</option>
       </select>
     </label>
-    <label class="flex items-center gap-1 text-meta"><input type="checkbox" bind:checked={form.init} /> init</label>
-    <Button onclick={create}>Create</Button>
+    <label class="flex items-center gap-1 text-meta"><input type="checkbox" bind:checked={form.init} /> {i18n.t('repos.init')}</label>
+    <Button onclick={create}>{i18n.t('common.create')}</Button>
   </div>
 {/if}
 
