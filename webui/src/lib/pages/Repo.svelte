@@ -1,12 +1,16 @@
 <script lang="ts">
-  import { File as FileIcon, Folder, GitCommitHorizontal, GitBranch, Tag, ArrowUp, Copy, Check } from '@lucide/svelte'
+  import { File as FileIcon, Folder, GitCommitHorizontal, GitBranch, Tag, ArrowUp, Copy, Check, GitPullRequest } from '@lucide/svelte'
   import Badge from '$lib/components/ui/badge.svelte'
   import type { Api, Repo, Entry, Commit, Ref, ConflictView } from '$lib/api'
+  import Requests from '$lib/pages/Requests.svelte'
 
   let { api, repo, onBack }: { api: Api; repo: Repo; onBack: () => void } = $props()
-  let tab = $state<'code' | 'branches' | 'tags' | 'commits'>('code')
+  let tab = $state<'code' | 'branches' | 'tags' | 'commits' | 'requests'>('code')
   let ref = $state(repo.default_branch || 'main')
   let path = $state('')
+  // Sub-scope (?path=): browse the namespace as if `scope` were the root. This
+  // is how an old "repository" (a subdirectory) is viewed.
+  let scope = $state('')
   let entries = $state<Entry[]>([])
   let blob = $state<{ is_text: boolean; content?: string; size: number; conflict?: boolean } | null>(null)
   let conflict = $state<ConflictView | null>(null)
@@ -29,13 +33,21 @@
       if (tab === 'code') await loadTree()
       else if (tab === 'branches') branches = (await api.branches(repo.namespace)).branches ?? []
       else if (tab === 'tags') tags = (await api.tags(repo.namespace)).tags ?? []
-      else commits = (await api.log(repo.namespace, ref)).commits ?? []
+      else if (tab === 'commits') commits = (await api.log(repo.namespace, ref)).commits ?? []
     } catch (e) {
       err = String(e)
     }
   }
+  const fullPath = (p: string) => (scope ? (p ? scope + '/' + p : scope) : p)
   async function loadTree() {
-    entries = (await api.tree(repo.namespace, ref, path)).entries ?? []
+    entries = (await api.tree(repo.namespace, ref, fullPath(path))).entries ?? []
+  }
+  function setScope(s: string) {
+    scope = s.trim().replace(/^\/+|\/+$/g, '')
+    path = ''
+    blob = null
+    conflict = null
+    loadTree()
   }
   async function open(e: Entry) {
     if (e.kind === 'dir') {
@@ -43,13 +55,13 @@
       blob = null
       await loadTree()
     } else {
-      blob = await api.blob(repo.namespace, ref, e.path)
+      blob = await api.blob(repo.namespace, ref, fullPath(e.path))
       if (blob.conflict) {
         // A conflicted file: load the STRUCTURED view (every way) alongside the
         // marker text.
         conflictPath = e.path
         try {
-          conflict = await api.conflict(repo.namespace, ref, e.path)
+          conflict = await api.conflict(repo.namespace, ref, fullPath(e.path))
         } catch {
           conflict = null
         }
@@ -106,7 +118,7 @@
 </div>
 
 <nav class="mb-4 flex gap-1">
-  {#each [['code', FileIcon], ['branches', GitBranch], ['tags', Tag], ['commits', GitCommitHorizontal]] as [id, Icon] (id)}
+  {#each [['code', FileIcon], ['branches', GitBranch], ['tags', Tag], ['commits', GitCommitHorizontal], ['requests', GitPullRequest]] as [id, Icon] (id)}
     <button onclick={() => (tab = id as typeof tab)}
       class="flex items-center gap-1.5 rounded-md border px-3 py-1 text-meta {tab === id ? 'border-primary text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}">
       <Icon class="size-3.5" />{id}
@@ -117,6 +129,11 @@
 {#if err}<p class="mb-3 text-meta text-destructive">{err}</p>{/if}
 
 {#if tab === 'code'}
+  <div class="mb-3 flex items-center gap-2">
+    <span class="text-micro text-muted-foreground">scope</span>
+    <input value={scope} onchange={(e) => setScope((e.target as HTMLInputElement).value)} placeholder="subdirectory (empty = root)" class="h-8 w-64 rounded-md border border-input bg-secondary px-2 font-mono text-micro" />
+    {#if scope}<span class="font-mono text-micro text-muted-foreground">/{scope}</span>{/if}
+  </div>
   {#if path}
     <div class="mb-2 flex items-center gap-2">
       <button onclick={up} class="flex items-center gap-1 text-micro text-primary hover:underline"><ArrowUp class="size-3" /> up</button>
@@ -196,6 +213,8 @@
       {/each}
     </tbody></table>
   </div>
+{:else if tab === 'requests'}
+  <Requests {api} {repo} />
 {:else}
   <ul class="overflow-hidden rounded-lg border border-border bg-card">
     {#each commits as c (c.sha)}

@@ -53,6 +53,31 @@ export interface ConflictView {
   terms: ConflictTerm[]
 }
 
+export interface RR {
+  iid: number
+  source_snapshot: string
+  base_snapshot: string
+  target_branch: string
+  state: string
+  title: string
+  body?: string
+  path?: string
+  created: number
+  updated: number
+  conflicts?: string[]
+  pending_revision?: string
+  reviews?: { id: number; state: string; body: string; created: number }[]
+  comments?: { id: number; body: string; path?: string; created: number }[]
+  merged_by?: number | null
+}
+export interface RRDiff {
+  path: string
+  status: string
+  added: number
+  removed: number
+  content?: string
+}
+
 export class Api {
   constructor(private token: () => string) {}
   private h(): HeadersInit {
@@ -72,6 +97,13 @@ export class Api {
   tree = (ns: string, ref: string, path: string) =>
     this.req<{ entries: Entry[] }>(
       `/api/v1/namespaces/${ns}/tree?` + new URLSearchParams({ ref, path }),
+    )
+  // Directory listing for a SUB-SCOPE: `scope` is the ?path= directory, `dir`
+  // the sub-path within it. A namespace's old "repository" is just a scope.
+  treeScoped = (ns: string, ref: string, scope: string, dir: string) =>
+    this.req<{ entries: Entry[] }>(
+      `/api/v1/namespaces/${ns}/tree?` +
+        new URLSearchParams({ ref, path: dir ? (scope ? scope + '/' + dir : dir) : scope }),
     )
   blob = (ns: string, ref: string, path: string) =>
     this.req<{ is_text: boolean; content?: string; size: number; binary?: boolean }>(
@@ -106,4 +138,53 @@ export class Api {
       body: JSON.stringify(body),
     })
   whoami = () => this.req<{ authenticated: boolean; username?: string }>('/api/v1/whoami')
+
+  // ---- Revision Requests (collaboration) ----
+  rrList = (ns: string, state?: string) =>
+    this.req<{ requests: RR[] }>(
+      `/api/v1/namespaces/${ns}/rr` + (state ? '?' + new URLSearchParams({ state }) : ''),
+    )
+  rrGet = (ns: string, iid: number) => this.req<RR>(`/api/v1/namespaces/${ns}/rr/${iid}`)
+  rrDiff = (ns: string, iid: number) =>
+    this.req<{ diffs: RRDiff[] }>(`/api/v1/namespaces/${ns}/rr/${iid}/diff`)
+  rrComment = (ns: string, iid: number, body: string, path?: string) =>
+    this.req<RR>(`/api/v1/namespaces/${ns}/rr/${iid}/comment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body, path: path ?? '' }),
+    })
+  rrReview = (ns: string, iid: number, state: string, body: string) =>
+    this.req<RR>(`/api/v1/namespaces/${ns}/rr/${iid}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state, body }),
+    })
+  // Resolve a conflict: pick a side, choose a rename path, or write bytes.
+  rrResolve = (
+    ns: string,
+    iid: number,
+    path: string,
+    opt: { side?: number; choosePath?: string; contentB64?: string },
+  ) =>
+    this.req<RR>(`/api/v1/namespaces/${ns}/rr/${iid}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path,
+        side: opt.side ?? 0,
+        choose_path: opt.choosePath ?? '',
+        content: opt.contentB64 ?? '',
+      }),
+    })
+  rrMerge = (ns: string, iid: number, allowConflict = false) =>
+    this.req<Record<string, unknown>>(
+      `/api/v1/namespaces/${ns}/rr/${iid}/merge` + (allowConflict ? '?allow_conflict=true' : ''),
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    )
+  rrClose = (ns: string, iid: number) =>
+    this.req<RR>(`/api/v1/namespaces/${ns}/rr/${iid}/close`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
 }

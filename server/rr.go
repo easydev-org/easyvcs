@@ -252,9 +252,14 @@ func (s *Server) handleRRGet(w http.ResponseWriter, r *http.Request) {
 		mergedBy = pm.MergedBy
 	}
 	view := rrViewDetail(x, reviews, comments, mergedBy)
-	// Conflicts are DERIVED from the pending merge, not an RR state.
+	// Conflicts are DERIVED from the pending merge, not an RR state. Expose the
+	// pending merge revision so a client can view each conflict's ways
+	// (GET .../conflict?ref=<pending_revision>&path=).
 	if svc, _, ok := s.rrService(w, r); ok {
 		view["conflicts"] = svc.PendingConflicts(x)
+		if pr, perr := s.cs.GetRRMerge(x.ID); perr == nil && pr.State == "pending" {
+			view["pending_revision"] = pr.MergedRevisionID
+		}
 	}
 	writeJSON(w, http.StatusOK, view)
 }
