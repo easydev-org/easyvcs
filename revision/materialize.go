@@ -82,6 +82,7 @@ func (w *Workspace) renderConflict(conflictID object.ID) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<<<<<<< conflict (%d terms)\n", c.Numeric())
 	if len(c.Adds) > 0 {
+		b.WriteString(termHeader(c.Adds[0]))
 		first, err := w.blobText(c.Adds[0].ID)
 		if err != nil {
 			return "", err
@@ -90,8 +91,7 @@ func (w *Workspace) renderConflict(conflictID object.ID) (string, error) {
 		b.WriteString("\n")
 	}
 	for i := 1; i < len(c.Adds); i++ {
-		label := c.Adds[i].Label
-		b.WriteString("%%%%%%% side #" + fmt.Sprint(i) + " (" + label + ")\n")
+		b.WriteString("%%%%%%% side #" + fmt.Sprint(i) + " (" + c.Adds[i].Label + ")" + termPath(c.Adds[i]) + "\n")
 		text, err := w.blobText(c.Adds[i].ID)
 		if err != nil {
 			return "", err
@@ -100,7 +100,7 @@ func (w *Workspace) renderConflict(conflictID object.ID) (string, error) {
 		b.WriteString("\n")
 	}
 	for _, term := range c.Removes {
-		b.WriteString("%%%%%%% diff from: " + term.Label + "\n")
+		b.WriteString("%%%%%%% diff from: " + term.Label + termPath(term) + "\n")
 		text, err := w.blobText(term.ID)
 		if err != nil {
 			return "", err
@@ -119,6 +119,19 @@ func (w *Workspace) renderConflict(conflictID object.ID) (string, error) {
 func (w *Workspace) partialMerge3Text(c *object.Conflict) (string, bool) {
 	if len(c.Removes) != 1 || len(c.Adds) != 2 {
 		return "", false
+	}
+	// Only a PLAIN content conflict at ONE path qualifies. A term carrying a Path
+	// is a rename conflict (the terms live at different paths), which must render
+	// with its path-bearing markers, not as a content merge of their blobs.
+	for _, t := range c.Removes {
+		if t.Path != "" {
+			return "", false
+		}
+	}
+	for _, t := range c.Adds {
+		if t.Path != "" {
+			return "", false
+		}
 	}
 	baseID, oursID, theirsID := c.Removes[0].ID, c.Adds[0].ID, c.Adds[1].ID
 	base, err := w.blobBytes(baseID)
@@ -156,6 +169,24 @@ func (w *Workspace) blobBytes(id object.ID) ([]byte, error) {
 		return nil, fmt.Errorf("object %s is not a blob", id)
 	}
 	return o.Blob, nil
+}
+
+// termPath renders " @ <path>" for a term that lives at a specific path (a
+// rename conflict term), or "" for a plain path-less term.
+func termPath(t object.Term) string {
+	if t.Path == "" {
+		return ""
+	}
+	return " @ " + t.Path
+}
+
+// termHeader is the label line for the FIRST add term (which has no %%%%%%%
+// prefix); it shows the term's path when it has one.
+func termHeader(t object.Term) string {
+	if t.Path == "" {
+		return ""
+	}
+	return "%%%%%%% at: " + t.Path + "\n"
 }
 
 // blobText returns text content of a blob, or "" for the absent id.

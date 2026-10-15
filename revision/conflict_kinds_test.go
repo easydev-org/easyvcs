@@ -167,3 +167,77 @@ func TestResolveToContent(t *testing.T) {
 	}
 	_ = repo
 }
+
+// TestConflictRenderFormats pins the rendered marker text for each conflict
+// shape, so the served/cloned view of a conflicted file is stable.
+func TestConflictRenderFormats(t *testing.T) {
+	render := func(t *testing.T, path string, baseCh, oursCh, theirsCh []FileChangeSpec) string {
+		t.Helper()
+		repo, _ := newTestRepo(t)
+		ws := NewWorkspace(repo)
+		base := ckCommit(t, ws, object.ID{}, baseCh, "base")
+		ours := ckCommit(t, ws, base.Hash, oursCh, "ours")
+		theirs := ckCommit(t, ws, base.Hash, theirsCh, "theirs")
+		bs, _ := ws.GetSnapshot(base.Hash)
+		os1, _ := ws.GetSnapshot(ours.Hash)
+		ts, _ := ws.GetSnapshot(theirs.Hash)
+		m, _, err := ws.Merge(bs.TreeID, os1.TreeID, ts.TreeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mt := ws.MustTree(m)
+		e, ok := mt.Entries[path]
+		if !ok || e.Kind != object.KindConflict {
+			t.Fatalf("%s is not a conflict (%v)", path, e.Kind)
+		}
+		txt, err := ws.RenderConflict(e.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return txt
+	}
+	blob := func(p, c string) []FileChangeSpec {
+		return []FileChangeSpec{{Path: p, Content: []byte(c)}}
+	}
+
+	// Text overlap: partial merge markers.
+	txt := render(t, "f.txt", blob("f.txt", "a\nb\nc\n"), blob("f.txt", "a\nOURS\nc\n"), blob("f.txt", "a\nTHEIRS\nc\n"))
+	if !strings.Contains(txt, "<<<<<<< conflict") || !strings.Contains(txt, "OURS") || !strings.Contains(txt, "THEIRS") {
+		t.Fatalf("text conflict markers:\n%s", txt)
+	}
+	if !strings.HasPrefix(txt, "a\n") {
+		t.Fatalf("clean prefix should be preserved:\n%s", txt)
+	}
+
+	// Delete vs modify: an explicit empty "theirs" side.
+	txt = render(t, "f.txt", blob("f.txt", "x\n"), []FileChangeSpec{{Path: "f.txt", Delete: true}}, blob("f.txt", "modified\n"))
+	if !strings.Contains(txt, "modified") || !strings.Contains(txt, ">>>>>>> conflict ends") {
+		t.Fatalf("delete/modify render:\n%s", txt)
+	}
+
+	// Rename conflict: term paths are shown.
+	txt = render(t, "old.txt",
+		blob("old.txt", "x\n"),
+		[]FileChangeSpec{{Path: "old.txt", Delete: true}, {Path: "A.txt", Content: []byte("x\n")}},
+		[]FileChangeSpec{{Path: "old.txt", Delete: true}, {Path: "B.txt", Content: []byte("x\n")}})
+	if !strings.Contains(txt, "A.txt") || !strings.Contains(txt, "B.txt") {
+		t.Fatalf("rename render must show both paths:\n%s", txt)
+	}
+
+	// Dir/file conflict: the directory listing is shown, not a silent drop.
+	txt = render(t, "x", blob("x", "file\n"),
+		[]FileChangeSpec{{Path: "x", Delete: true}, {Path: "x/y", Content: []byte("nested\n")}},
+		blob("x", "MODIFIED\n"))
+	if !strings.Contains(txt, "directory") || !strings.Contains(txt, "MODIFIED") {
+		t.Fatalf("dir/file render:\n%s", txt)
+	}
+
+	// Binary conflict: placeholders, no NUL bytes.
+	txt = render(t, "b.bin",
+		[]FileChangeSpec{{Path: "b.bin", Content: []byte{0, 1, 2}}},
+		[]FileChangeSpec{{Path: "b.bin", Content: []byte{0, 3, 4}}},
+		[]FileChangeSpec{{Path: "b.bin", Content: []byte{0, 5, 6}}})
+	if strings.ContainsRune(txt, 0) || !strings.Contains(txt, "binary blob") {
+		t.Fatalf("binary render:\n%q", txt)
+	}
+}
