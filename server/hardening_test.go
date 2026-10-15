@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -375,5 +376,41 @@ func TestAuditIPNotSpoofed(t *testing.T) {
 	}
 	if sink.events[0].IP == "1.2.3.4" {
 		t.Fatal("X-Forwarded-For must not be trusted without EASYVCS_TRUSTED_PROXY")
+	}
+}
+
+// TestDecodeBundleBodyLargeCompressed guards the regression where the gzip
+// decoder was wrapped in a LimitReader of the SAME size as the body limit: a
+// compressed bundle LARGER than the limit (possible because the limit counts
+// compressed bytes, while a highly-compressed frame can inflate far beyond it)
+// was truncated mid-stream ("unexpected EOF"). The decode must succeed for a
+// multi-MiB compressed bundle.
+func TestDecodeBundleBodyLargeCompressed(t *testing.T) {
+	b := transfer.Bundle{}
+	for i := 0; i < 4000; i++ {
+		buf := make([]byte, 4096)
+		if _, err := rand.Read(buf); err != nil {
+			t.Fatal(err)
+		}
+		b.Objects = append(b.Objects, transfer.ObjectRecord{
+			Kind:    object.KindBlob,
+			Content: buf,
+		})
+	}
+	payload, err := transfer.CompressBundle(&b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) <= 1<<20 {
+		t.Fatalf("fixture compressed to %d bytes; need > 1 MiB to exercise the bug", len(payload))
+	}
+	req := httptest.NewRequest(http.MethodPost, "/push", bytes.NewReader(payload))
+	req.Header.Set("Content-Encoding", "gzip")
+	got, err := decodeBundleBody(req)
+	if err != nil {
+		t.Fatalf("decodeBundleBody failed on a %d-byte compressed bundle: %v", len(payload), err)
+	}
+	if len(got.Objects) != len(b.Objects) {
+		t.Fatalf("decoded %d objects, want %d", len(got.Objects), len(b.Objects))
 	}
 }

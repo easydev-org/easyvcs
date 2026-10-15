@@ -201,3 +201,55 @@ func refNamesOf(t *testing.T, sto storer.Storer) map[string]bool {
 	it.Close()
 	return out
 }
+
+// TestGitCloneDirFileOrder pins the git tree-order fix: a tree containing BOTH
+// "a.txt" and a directory "a/" must be served in git's tree order (a directory
+// compares as if its name had a trailing "/", so "a/" < "a.txt"), otherwise
+// go-git's Tree.Encode REJECTS the out-of-order tree ("entries in tree are not
+// sorted") and `git clone` 500s. Plain byte order would put "a.txt" before "a".
+func TestGitCloneDirFileOrder(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI not available")
+	}
+	t.Setenv("EASYVCS_HOME", t.TempDir())
+	cs, err := store.OpenDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	repo, _ := cs.Create(store.NSRef{Name: "order"})
+	ws := revision.NewWorkspace(repo)
+	// A file "a.txt" AND a directory "a" with a child: "a.txt" < "a" byte-wise,
+	// but git order needs "a/" < "a.txt".
+	_, r1, err := ws.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{
+		{Path: "a.txt", Content: []byte("file\n")},
+		{Path: "a/b.txt", Content: []byte("nested\n")},
+	}, "init", store.Author{Name: "t"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.SetRef("main", store.RefBranch, r1.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	sto, err := Build(ws, repo, "")
+	if err != nil {
+		t.Fatalf("Build (tree encode) failed on a dir/file-order tree: %v", err)
+	}
+	srv := New(sto)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repo.git/info/refs", srv.InfoRefs)
+	mux.HandleFunc("/repo.git/git-upload-pack", srv.UploadPack)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	dst := filepath.Join(t.TempDir(), "clone")
+	if out, err := exec.Command("git", "clone", ts.URL+"/repo.git", dst).CombinedOutput(); err != nil {
+		t.Fatalf("git clone failed: %v\n%s", err, out)
+	}
+	for _, f := range []string{"a.txt", "a/b.txt"} {
+		if _, err := os.Stat(filepath.Join(dst, f)); err != nil {
+			t.Fatalf("cloned repo missing %s: %v", f, err)
+		}
+	}
+}
