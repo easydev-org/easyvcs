@@ -58,6 +58,11 @@ type AdvertiseResp struct {
 	// drop its new snapshot. Omitted (nil) by older servers, in which case a
 	// client falls back to id-only skipping.
 	ChangeHashes map[string]string `json:"change_hashes,omitempty"`
+	// ObjectBloom is a base64 Bloom filter of every object id the server holds.
+	// A pushing client uses it to SKIP objects the server already has (object-
+	// level delta) without a full id list. Absent (empty) => the client sends
+	// everything (older servers, or a store with no objects yet).
+	ObjectBloom string `json:"object_bloom,omitempty"`
 }
 
 // AuditSink receives an AuditEvent for access attempts. The default sink writes
@@ -404,7 +409,12 @@ func (s *Server) handleAdvertise(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, c.ID)
 		hashes[c.ID] = c.Hash.String()
 	}
-	writeJSON(w, http.StatusOK, AdvertiseResp{Repo: repo.String(), Changes: ids, Refs: refs, ChangeHashes: hashes})
+	bloom, _ := s.cs.ObjectBloom()
+	bloomEnc := ""
+	if bloom != nil {
+		bloomEnc = bloom.Encode()
+	}
+	writeJSON(w, http.StatusOK, AdvertiseResp{Repo: repo.String(), Changes: ids, Refs: refs, ChangeHashes: hashes, ObjectBloom: bloomEnc})
 }
 
 func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {

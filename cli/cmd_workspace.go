@@ -312,7 +312,11 @@ func cmdWorkspaceList(c *ctx) {
 }
 
 func cmdRepositories(c *ctx) {
-	repos, err := c.cs.List()
+	cs, err := c.open()
+	if err != nil {
+		c.fatal("repositories:", err)
+	}
+	repos, err := cs.List()
 	if err != nil {
 		c.fatal("repositories:", err)
 	}

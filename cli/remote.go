@@ -35,6 +35,10 @@ type advertiseResp struct {
 	// snapshot" (a rewritten revision that must be re-sent). Omitted by older
 	// servers => fall back to id-only skipping.
 	ChangeHashes map[string]string `json:"change_hashes,omitempty"`
+	// ObjectBloom is a base64 Bloom filter of the server's object ids; used to
+	// skip objects the server already holds (object-level delta). Empty => no
+	// filter (send everything for the missing revisions).
+	ObjectBloom string `json:"object_bloom,omitempty"`
 }
 
 // --- remote configuration ---
@@ -863,7 +867,15 @@ func doPushHTTP(repo *store.Repo, rem *store.Remote) error {
 	// advertise means the server holds nothing yet: send the full bundle
 	// (have empty) so every revision lands before the refs point at them.
 	have := serverHaveSet(repo, adv)
-	b, err := transfer.Collect(repo, have, nil)
+	// Object-level delta: skip objects the server already holds (advertised as a
+	// Bloom filter). A false positive makes us skip an object the server needs;
+	// the push then fails with a missing-object error, so the caller can retry.
+	bloom := store.DecodeObjectBloom(adv.ObjectBloom)
+	var hasObject func(object.ID) bool
+	if bloom != nil {
+		hasObject = func(id object.ID) bool { return bloom.MayContain(id) }
+	}
+	b, err := transfer.Collect(repo, have, hasObject)
 	if err != nil {
 		return err
 	}

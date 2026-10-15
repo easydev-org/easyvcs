@@ -84,9 +84,37 @@ Flags:
 
 type ctx struct {
 	cs *store.CentralStore
+	// readOnly marks a command that never writes: the store is opened lazily
+	// WITHOUT SetWAL/migrations (a pure read must not write to the DB file).
+	readOnly bool
 	// onErr, when set, replaces the process-exit behavior of command failures
 	// (tests install a panic-based hook so failures are observable).
 	onErr func()
+}
+
+// readOnlyCommand reports whether a command only reads. Such a command opens the
+// store lazily and skips WAL/migrations, so a read never mutates the DB file.
+func readOnlyCommand(cmd string) bool {
+	switch cmd {
+	case "log", "show", "refs", "diff", "verify", "repositories":
+		return true
+	default:
+		return false
+	}
+}
+
+// open ensures c.cs is set. For a read-only command the store is opened WITHOUT
+// SetWAL (no write); for others the caller has already opened it with WAL.
+func (c *ctx) open() (*store.CentralStore, error) {
+	if c.cs != nil {
+		return c.cs, nil
+	}
+	cs, err := store.OpenDefault()
+	if err != nil {
+		return nil, err
+	}
+	c.cs = cs
+	return cs, nil
 }
 
 // fatal reports a command failure and terminates the command. In production it
@@ -203,16 +231,23 @@ func main() {
 		os.Exit(0)
 	}
 
-	cs, err := store.OpenDefault()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "open store:", err)
-		os.Exit(1)
+	// Open the store lazily. A READ-ONLY command (log/show/refs/diff/verify/…)
+	// must not enable WAL or run migrations — that is a write to the DB file and
+	// adds cold-start cost for a pure read. Only write commands (and reads that
+	// the caller routes through a write-capable helper) opt in.
+	c := &ctx{readOnly: readOnlyCommand(cmd)}
+	if !c.readOnly {
+		cs, err := store.OpenDefault()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "open store:", err)
+			os.Exit(1)
+		}
+		if err := cs.SetWAL(); err != nil {
+			fmt.Fprintln(os.Stderr, "enable WAL:", err)
+			os.Exit(1)
+		}
+		c.cs = cs
 	}
-	if err := cs.SetWAL(); err != nil {
-		fmt.Fprintln(os.Stderr, "enable WAL:", err)
-		os.Exit(1)
-	}
-	c := &ctx{cs: cs}
 
 	switch cmd {
 	case "init":
@@ -314,6 +349,10 @@ func (c *ctx) loadRepo() (*store.Repo, *store.WorkspaceMarker, error) {
 	cs, err := store.OpenStoreForMarker(marker)
 	if err != nil {
 		return nil, nil, err
+	}
+	if !c.readOnly {
+		// Write-capable command: enable WAL once the store is known.
+		_ = cs.SetWAL()
 	}
 	c.cs = cs
 	repo, err := c.cs.OpenRepo(marker.Repo)

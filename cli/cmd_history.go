@@ -157,7 +157,11 @@ func cmdGC(c *ctx) {
 }
 
 func cmdVerify(c *ctx) {
-	res, err := revision.Verify(c.cs)
+	cs, err := c.open()
+	if err != nil {
+		c.fatal("verify:", err)
+	}
+	res, err := revision.Verify(cs)
 	if err != nil {
 		c.fatal("verify:", err)
 	}
