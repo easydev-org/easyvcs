@@ -84,6 +84,22 @@ SetWAL** —— 打开 DB 与 `PRAGMA journal_mode=WAL` 都是写操作，纯读
 
 （运行：`EASYVCS_TEST_PG_DSN='postgresql://…?client_encoding=UTF8' go test ./store/ -run '^$' -bench BenchmarkPG`）
 
+## 4d. 并发基准
+
+写并发模型：**每 namespace 一把锁**（VCS 语义：历史线性）；**不同 namespace 并行**。
+
+| 基准（8 并发）| SQLite | Postgres |
+|---|---|---|
+| `ConcurrentDistinctNS`（不同 ns）| ~1.52 ms/op | **~0.48 ms/op** |
+| `ConcurrentSameNS`（同一 ns）| ~1.54 ms/op | **~0.83 ms/op** |
+
+**结论**：
+- **SQLite**：单连接 → **两者相同**（DB 是瓶颈，与 app 无关）。
+- **Postgres**：**不同 ns 并行**（独立连接）→ **~1.7× 于同 ns**（后者被 repo 锁串行）。
+  单线程基线 ~0.82 ms/op → 8 并发不同 ns ~0.48 ms/op（**有收益，受连接池/磁盘限制，非 8×**）。
+
+（运行：`EASYVCS_TEST_PG_DSN='postgresql://…?client_encoding=UTF8' go test ./store/ -run '^$' -bench BenchmarkPGConcurrent`）
+
 ## 5. 已知短板（诚实）
 
 | 短板 | 影响 | 缓解 |
