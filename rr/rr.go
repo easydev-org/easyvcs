@@ -246,13 +246,16 @@ func (s *Service) ComputeMerge(rr *store.RevisionRequest, merger store.Author) (
 	if err != nil {
 		return MergeResult{}, err
 	}
-	// base: the pinned creation-time target tip tree, or the empty tree when the
-	// target branch did not exist then (zero base_snapshot).
-	baseTree, err := s.baseTree(rr)
+	srcSnap, err := s.snapshotOf(rr.SourceSnapshot)
 	if err != nil {
 		return MergeResult{}, err
 	}
-	srcSnap, err := s.snapshotOf(rr.SourceSnapshot)
+	// base: the pinned creation-time target tip tree. When the source does NOT
+	// descend from it (a non-descendant / ROOT source, e.g. a snapshot built on
+	// an empty tree), re-base onto the source's OWN PARENT so the merge applies
+	// the source's CHANGES rather than treating every target file the source
+	// lacks as a deletion and WIPING the branch (see mergeBase).
+	baseTree, err := s.mergeBase(rr, srcSnap)
 	if err != nil {
 		return MergeResult{}, err
 	}
@@ -497,6 +500,69 @@ func (s *Service) baseTree(rr *store.RevisionRequest) (object.ID, error) {
 		return object.ID{}, fmt.Errorf("rr: base snapshot %s not found: %w", rr.BaseSnapshot, err)
 	}
 	return snap.TreeID, nil
+}
+
+// mergeBase returns the 3-way merge base tree for an RR. It uses the RR's
+// recorded base when the SOURCE snapshot descends from it; otherwise (a
+// non-descendant source — e.g. a root revision produced by a commit to a
+// non-existent branch, or a snapshot built on an empty tree) it re-bases onto
+// the source's own parent. Without this, a non-descendant source with base=∅
+// would make the merge treat every target file the source lacks as a DELETION
+// and wipe the branch.
+func (s *Service) mergeBase(rr *store.RevisionRequest, srcSnap *store.Snapshot) (object.ID, error) {
+	baseID, err := object.HexToID(rr.BaseSnapshot)
+	if err != nil {
+		return object.ID{}, fmt.Errorf("rr: bad base snapshot hash %q: %w", rr.BaseSnapshot, err)
+	}
+	if baseID.IsZero() {
+		if len(srcSnap.Parents) > 0 {
+			if ps, perr := s.repo.GetSnapshot(srcSnap.Parents[0]); perr == nil {
+				return ps.TreeID, nil
+			}
+		}
+		return object.ID{}, nil
+	}
+	if s.sourceDescendsFromBase(srcSnap, baseID) {
+		bs, berr := s.repo.GetSnapshot(baseID)
+		if berr != nil {
+			return object.ID{}, fmt.Errorf("rr: base snapshot %s not found: %w", rr.BaseSnapshot, berr)
+		}
+		return bs.TreeID, nil
+	}
+	if len(srcSnap.Parents) > 0 {
+		if ps, perr := s.repo.GetSnapshot(srcSnap.Parents[0]); perr == nil {
+			return ps.TreeID, nil
+		}
+	}
+	return object.ID{}, nil
+}
+
+// sourceDescendsFromBase reports whether `src` is `base` or a descendant of it,
+// walking the snapshot-parent DAG (bounded). A non-descendant means the RR's
+// recorded base is not a valid 3-way base.
+func (s *Service) sourceDescendsFromBase(src *store.Snapshot, base object.ID) bool {
+	if src == nil {
+		return false
+	}
+	seen := map[object.ID]bool{}
+	queue := []object.ID{src.RevisionHash}
+	for len(queue) > 0 && len(seen) < 100000 {
+		cur := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if cur == base {
+			return true
+		}
+		if seen[cur] {
+			continue
+		}
+		seen[cur] = true
+		snap, err := s.repo.GetSnapshot(cur)
+		if err != nil {
+			continue
+		}
+		queue = append(queue, snap.Parents...)
+	}
+	return false
 }
 
 // treeOfSnapshot resolves a snapshot hash string to its tree id.

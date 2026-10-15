@@ -60,12 +60,14 @@ func TestBatchFetchers(t *testing.T) {
 	}
 }
 
-// The snapshot/revision caches serve repeated reads from memory, and an AMEND
-// (PutRevisionTx reusing an id with a new hash) refreshes the cache so a read
-// never returns a stale hash.
-func TestSnapshotRevisionCacheAmendRefresh(t *testing.T) {
+// A revision is NOT cached: its id is stable but its HASH mutates on amend /
+// rewrite, so an id->hash cache would serve a stale hash when the row is
+// rewritten by another store instance / replica. This test pins that a rewrite
+// is always observed (no revision cache in the way). The SNAPSHOT cache is safe
+// because it is keyed by the content-addressed (immutable) hash.
+func TestRevisionRewriteAlwaysObserved(t *testing.T) {
 	cs := newTestCentral(t)
-	repo, _ := cs.Create(NSRef{Name: "cacheamend"})
+	repo, _ := cs.Create(NSRef{Name: "rewriteobs"})
 	tree := object.NewTree()
 	treeObj := &object.Object{Kind: object.KindTree, Tree: tree}
 	_ = repo.WriteObject(treeObj)
@@ -74,19 +76,17 @@ func TestSnapshotRevisionCacheAmendRefresh(t *testing.T) {
 	_ = repo.PutSnapshot(snap)
 	_ = repo.PutRevision(&Revision{ID: "r1", Hash: snap.RevisionHash, Created: now()})
 
-	// Prime the cache.
-	if r, _ := repo.GetRevision("r1"); r.Hash != snap.RevisionHash {
-		t.Fatal("prime failed")
-	}
-	// Amend: same id, new hash, via the TX path (as CommitFromChanges does).
+	// Amend: same id, new hash.
 	snap2 := &Snapshot{RevisionID: "r1", TreeID: treeObj.ID(), Description: "v2"}
 	snap2.RevisionHash = SnapshotHashFor(snap2)
 	_ = repo.PutSnapshot(snap2)
-	tx := repo.BeginTx()
-	_ = repo.PutRevisionTx(tx, &Revision{ID: "r1", Hash: snap2.RevisionHash, Created: now()})
-	_ = tx.Commit()
-	// The cache MUST reflect the new hash, not the stale one.
+	_ = repo.PutRevision(&Revision{ID: "r1", Hash: snap2.RevisionHash, Created: now()})
+	// GetRevision must reflect the NEW hash.
 	if r, _ := repo.GetRevision("r1"); r.Hash != snap2.RevisionHash {
-		t.Fatalf("cache served a stale hash after amend: %s want %s", r.Hash, snap2.RevisionHash)
+		t.Fatalf("revision hash stale after rewrite: %s want %s", r.Hash, snap2.RevisionHash)
+	}
+	// The snapshot cache serves the NEW snapshot by its hash.
+	if sn, _ := repo.GetSnapshot(snap2.RevisionHash); sn.Description != "v2" {
+		t.Fatalf("snapshot cache wrong: %q", sn.Description)
 	}
 }

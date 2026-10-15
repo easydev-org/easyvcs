@@ -125,3 +125,45 @@ func mustBlob(t *testing.T, ws *revision.Workspace, id object.ID) string {
 	}
 	return string(b)
 }
+
+// TestSequentialMergeNoRebase pins that two RRs opened against the SAME base can
+// be merged back-to-back WITHOUT rebasing the second: each merge is a 3-way
+// merge of (pinned base, source, CURRENT target tip), so the first merge moving
+// the target does not invalidate the second (when they touch different files).
+// This is the easyvcs advantage over a git MR, whose diff is pinned to a fixed
+// base and drifts once the target advances.
+func TestSequentialMergeNoRebase(t *testing.T) {
+	cs, repo := newStore(t)
+	ws := revision.NewWorkspace(repo)
+	svc := New(cs, repo)
+
+	base := commitNested(t, ws, nil, map[string]string{"a.txt": "a0\n", "b.txt": "b0\n"}, "base")
+	_, _ = ws.SetRef("main", store.RefBranch, base.RevisionID)
+
+	// Two sources off the SAME base, touching DIFFERENT files.
+	s1 := commitNested(t, ws, []object.ID{base.RevisionHash}, map[string]string{"a.txt": "a1\n", "b.txt": "b0\n"}, "s1")
+	s2 := commitNested(t, ws, []object.ID{base.RevisionHash}, map[string]string{"a.txt": "a0\n", "b.txt": "b1\n"}, "s2")
+
+	rr1, _ := svc.Create(Source{Snapshot: s1.RevisionHash}, "main", "mr1", "", nil)
+	rr2, _ := svc.Create(Source{Snapshot: s2.RevisionHash}, "main", "mr2", "", nil)
+
+	if r, err := svc.ApplyMerge(rr1, testAuthor(), testUserID()); err != nil || !r.Clean {
+		t.Fatalf("merge1: %v clean=%v", err, r.Clean)
+	}
+	// The SECOND merge needs NO rebase.
+	if r, err := svc.ApplyMerge(rr2, testAuthor(), testUserID()); err != nil || !r.Clean {
+		t.Fatalf("merge2 (no rebase): %v clean=%v", err, r.Clean)
+	}
+	// Both changes are present on main.
+	ref, _ := ws.GetRef("main")
+	rev, _ := repo.GetRevision(ref.Target)
+	snap, _ := repo.GetSnapshot(rev.Hash)
+	root := ws.MustTree(snap.TreeID)
+	ae, _ := ws.FindEntry(root, "a.txt")
+	ab, _ := ws.ReadBlob(ae.ID)
+	be, _ := ws.FindEntry(root, "b.txt")
+	bb, _ := ws.ReadBlob(be.ID)
+	if string(ab) != "a1\n" || string(bb) != "b1\n" {
+		t.Fatalf("both changes must land: a=%q b=%q", string(ab), string(bb))
+	}
+}

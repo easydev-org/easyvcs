@@ -32,10 +32,15 @@ type CentralStore struct {
 	// objCache is a bounded LRU of decoded objects (content-addressed and
 	// immutable, so it never goes stale). Sized by WithObjectCache.
 	objCache *objectCache
-	// snapCache / revCache are bounded LRUs of snapshots / revisions (immutable
-	// once written). They absorb the repeated lookups of log / browse / history.
+	// snapCache is a bounded LRU of SNAPSHOTS, keyed by their content-addressed
+	// hash (immutable, so it never goes stale). It absorbs the repeated snapshot
+	// lookups of log / browse / history.
+	//
+	// NOTE: there is deliberately NO revision cache. A revision is keyed by its
+	// STABLE id but its `hash` MUTATES on amend/rewrite, so an id->hash cache
+	// would serve a stale hash when the row is rewritten by another store
+	// instance / replica.
 	snapCache *lru[*Snapshot]
-	revCache  *lru[*Revision]
 	// idxQueue defers the path-index write off the commit path. nil = synchronous
 	// (the safe default; the server/CLI opt in via WithAsyncIndex).
 	idxQueue *indexQueue
@@ -60,7 +65,6 @@ const DefaultObjectCacheEntries = 4096
 func (s *CentralStore) WithObjectCache(entries int) *CentralStore {
 	s.objCache = newObjectCache(entries)
 	s.snapCache = newLRU[*Snapshot](entries)
-	s.revCache = newLRU[*Revision](entries)
 	return s
 }
 

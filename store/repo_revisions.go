@@ -21,8 +21,6 @@ func (r *Repo) PutRevision(rev *Revision) error {
 	}).Create(row).Error; err != nil {
 		return err
 	}
-	// Refresh the cache: a revision row can be re-put (same id, updated hash).
-	r.cs.revCache.put(rev.ID, rev)
 	// Async: defer the index write to the background worker (read-your-writes is
 	// preserved by RevisionsTouching's flush).
 	if r.cs.idxQueue != nil {
@@ -45,10 +43,6 @@ func (r *Repo) PutRevisionTx(tx *gorm.DB, rev *Revision) error {
 	// the caller via IndexRevision AFTER the transaction commits. Writing it
 	// inside the tx would both bloat the commit and (async) duplicate the work.
 	//
-	// The CACHE is refreshed here so a same-transaction read sees the new row;
-	// an amend reuses the revision id with a new hash, so the stale entry MUST be
-	// replaced (not left).
-	r.cs.revCache.put(rev.ID, rev)
 	return nil
 }
 
@@ -183,9 +177,6 @@ func (r *Repo) toRevisionRow(rev *Revision) *revisionRow {
 
 // GetRevision reads a revision scoped to this repository.
 func (r *Repo) GetRevision(id string) (*Revision, error) {
-	if rev, ok := r.cs.revCache.get(id); ok {
-		return rev, nil
-	}
 	var row revisionRow
 	err := r.cs.d.gdb.Where("namespace_id=? AND id=?", r.namespaceID, id).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -198,7 +189,6 @@ func (r *Repo) GetRevision(id string) (*Revision, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.cs.revCache.put(id, rev)
 	return rev, nil
 }
 
@@ -214,10 +204,6 @@ func (r *Repo) RevisionsByIDs(ids []string) (map[string]*Revision, error) {
 			continue
 		}
 		seen[id] = true
-		if rev, ok := r.cs.revCache.get(id); ok {
-			out[id] = rev
-			continue
-		}
 		missing = append(missing, id)
 	}
 	if len(missing) == 0 {
@@ -233,7 +219,6 @@ func (r *Repo) RevisionsByIDs(ids []string) (map[string]*Revision, error) {
 			continue
 		}
 		out[rows[i].ID] = rev
-		r.cs.revCache.put(rows[i].ID, rev)
 	}
 	return out, nil
 }
