@@ -72,6 +72,12 @@ export interface RR {
   comments?: { id: number; body: string; path?: string; created: number }[]
   merged_by?: number | null
 }
+export interface SearchHit {
+  path: string
+  line?: number
+  text?: string
+  matches?: string[]
+}
 export interface CommitMeta {
   revision_id: string
   sha: string
@@ -141,6 +147,31 @@ export class Api {
   // Line diff between two refs (unified per-file content).
   diff = (ns: string, base: string, head: string) =>
     this.req<{ files: RRDiff[] }>(`/api/v1/namespaces/${ns}/diff?` + new URLSearchParams({ base, head }))
+  // Write a file (create/update/delete) on a NON-protected branch via /commit.
+  commitFiles = (
+    ns: string,
+    body: { branch: string; message: string; files: { path: string; operation: string; content?: string }[] },
+  ) =>
+    this.req<{ ok: boolean; branch: string; revision_id: string; snapshot: string }>(
+      `/api/v1/namespaces/${ns}/commit`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    )
+  createBranch = (ns: string, name: string, from: string) =>
+    this.req<Ref>(`/api/v1/namespaces/${ns}/branches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, from }),
+    })
+  createTag = (ns: string, name: string, target: string) =>
+    this.req<Ref>(`/api/v1/namespaces/${ns}/tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, target }),
+    })
+  search = (ns: string, ref: string, q: { name?: string; content?: string }) =>
+    this.req<{ results: SearchHit[] }>(
+      `/api/v1/namespaces/${ns}/search?` + new URLSearchParams({ ref, ...q } as Record<string, string>),
+    )
   branches = (ns: string) => this.req<{ branches: Ref[] }>(`/api/v1/namespaces/${ns}/branches`)
   deleteBranch = (ns: string, branch: string) =>
     this.req<unknown>(`/api/v1/namespaces/${ns}/branches/${branch}`, { method: 'DELETE' })

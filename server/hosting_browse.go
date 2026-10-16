@@ -579,3 +579,92 @@ func entryKindName(k object.Kind) string {
 		return "file"
 	}
 }
+
+// handleSearch searches a namespace's tree at ?ref= for a query. Two modes:
+//   - ?name=<q>   matches FILE PATHS (substring, case-insensitive).
+//   - ?content=<q> matches file CONTENTS (text files only; returns matching lines).
+//
+// At least one is required. Results are capped by ?limit= (default 50).
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	ws := revision.NewWorkspace(repo)
+	nameQ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("name")))
+	contentQ := strings.TrimSpace(r.URL.Query().Get("content"))
+	if nameQ == "" && contentQ == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name or content query is required"))
+		return
+	}
+	treeID, err := resolveRefTree(repo, ws, r.URL.Query().Get("ref"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	limit := limitFrom(r)
+	scope := scopePath(r)
+	var root *object.Tree
+	if scope == "" {
+		root = ws.MustTree(treeID)
+	} else {
+		root = ws.MustTree(treeID)
+		e, ferr := ws.FindEntry(root, scope)
+		if ferr != nil || e.Kind != object.KindTree {
+			writeErr(w, http.StatusNotFound, fmt.Errorf("scope %q not found", scope))
+			return
+		}
+		root = ws.MustTree(e.ID)
+	}
+	type hit struct {
+		Path    string   `json:"path"`
+		Line    int      `json:"line,omitempty"`
+		Text    string   `json:"text,omitempty"`
+		Matches []string `json:"matches,omitempty"`
+	}
+	var out []hit
+	var walk func(prefix string, t *object.Tree)
+	walk = func(prefix string, t *object.Tree) {
+		for _, e := range t.SortedEntries() {
+			if len(out) >= limit {
+				return
+			}
+			p := joinPath(prefix, e.Name)
+			switch e.Kind {
+			case object.KindTree:
+				if sub, serr := ws.ReadTree(e.ID); serr == nil {
+					walk(p, sub)
+				}
+			case object.KindBlob:
+				if nameQ != "" && strings.Contains(strings.ToLower(p), nameQ) {
+					out = append(out, hit{Path: p})
+					continue
+				}
+				if contentQ != "" {
+					data, berr := ws.ReadBlob(e.ID)
+					if berr != nil || revision.IsBinary(data) {
+						continue
+					}
+					lines := strings.Split(string(data), "\n")
+					var matches []string
+					firstLine := 0
+					for i, ln := range lines {
+						if strings.Contains(ln, contentQ) {
+							if firstLine == 0 {
+								firstLine = i + 1
+							}
+							if len(matches) < 5 {
+								matches = append(matches, strings.TrimSpace(ln))
+							}
+						}
+					}
+					if len(matches) > 0 {
+						out = append(out, hit{Path: p, Line: firstLine, Text: strings.Join(matches, "\n"), Matches: matches})
+					}
+				}
+			}
+		}
+	}
+	walk("", root)
+	writeJSON(w, http.StatusOK, map[string]any{"results": out, "query": map[string]string{"name": nameQ, "content": contentQ}})
+}

@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { File as FileIcon, Folder, GitCommitHorizontal, GitBranch, Tag, ArrowUp, Copy, Check, GitPullRequest, ChevronRight, ChevronDown, Trash2 } from '@lucide/svelte'
+  import { File as FileIcon, Folder, GitCommitHorizontal, GitBranch, Tag, ArrowUp, Copy, Check, GitPullRequest, ChevronRight, ChevronDown, Trash2, Pencil, FilePlus, Search } from '@lucide/svelte'
   import Badge from '$lib/components/ui/badge.svelte'
   import Button from '$lib/components/ui/button.svelte'
   import Skeleton from '$lib/components/ui/skeleton.svelte'
   import Confirm from '$lib/components/ui/confirm.svelte'
-  import type { Api, Entry, Commit, Ref, ConflictView, CommitMeta, RRDiff } from '$lib/api'
+  import Modal from '$lib/components/ui/modal.svelte'
+  import type { Api, Entry, Commit, Ref, ConflictView, CommitMeta, RRDiff, SearchHit } from '$lib/api'
   import { i18n } from '$lib/i18n/store.svelte'
   import { router } from '$lib/router.svelte'
   import { toasts } from '$lib/toast.svelte'
@@ -20,6 +21,8 @@
   let iid = $state('')
   let entries = $state<Entry[]>([])
   let blob = $state<{ is_text: boolean; content?: string; size: number; conflict?: boolean } | null>(null)
+  // The currently-open FILE, as a scope-relative path (e.g. "lib/util.go").
+  let openFile = $state('')
   let conflict = $state<ConflictView | null>(null)
   let readme = $state<{ path: string; content: string } | null>(null)
   let branches = $state<Ref[]>([])
@@ -32,6 +35,26 @@
   let err = $state('')
   let confirmDel = $state<string | null>(null)
   let refOpen = $state(false)
+  // write ops
+  let editing = $state<{ path: string; content: string; isNew: boolean } | null>(null)
+  let editMsg = $state('')
+  // Draft revision (jj-style working-copy commit): edits accumulate into ONE
+  // revision until it is formally Committed (reworded + locked). Persisted per
+  // namespace+ref so a refresh keeps the draft.
+  let draftRevisionId = $state<string | null>(null)
+  let draftDirty = $state(false)
+  let committing = $state(false)
+  let commitMsg = $state('')
+  const draftKey = $derived('easyvcsDraft:' + ns + ':' + ref)
+  let confirmDelFile = $state<string | null>(null)
+  let createRef = $state<'branch' | 'tag' | null>(null)
+  let newRefName = $state('')
+  // search
+  let searchOpen = $state(false)
+  let searchQ = $state('')
+  let searchMode = $state<'name' | 'content'>('name')
+  let searchHits = $state<SearchHit[]>([])
+  let searching = $state(false)
 
   // Sync local view state from the URL route.
   $effect(() => {
@@ -92,6 +115,7 @@
     if (e.kind === 'dir') {
       set({ path: e.path })
     } else {
+      openFile = e.path
       blob = await api.blob(ns, ref, fullPath(e.path))
       conflict = null
       if (blob.conflict) {
@@ -107,7 +131,11 @@
   }
   function setScope(s: string) {
     scope = s.trim().replace(/^\/+|\/+$/g, '')
+    path = ''
+    blob = null
+    conflict = null
     set({ path: '' })
+    loadTree()
   }
   function pickRef(kind: string, name: string) {
     refOpen = false
@@ -158,6 +186,124 @@
     ...commits.slice(0, 10).map((c) => ({ kind: 'revision', name: c.sha })),
   ])
 
+  function startEdit() {
+    if (!blob || blob.conflict) return
+    // The edited path is the FILE (scope + relative path), not the directory.
+    editing = { path: fullPath(openFile), content: blob.content ?? '', isNew: false }
+    editMsg = ''
+  }
+  function startNew() {
+    editing = { path: fullPath(path ? path + '/new-file.txt' : 'new-file.txt'), content: '', isNew: true }
+    editMsg = ''
+  }
+  // Load/save the draft revision id for the current ns+ref.
+  function loadDraft() {
+    draftRevisionId = localStorage.getItem(draftKey)
+    draftDirty = false
+  }
+  function setDraft(id: string | null) {
+    draftRevisionId = id
+    if (id) localStorage.setItem(draftKey, id)
+    else localStorage.removeItem(draftKey)
+  }
+  // Save applies an edit to the DRAFT revision: the first save creates a draft
+  // (message "wip"); later saves AMEND it (same revision id), so many edits
+  // accumulate into ONE revision until it is formally committed.
+  async function saveEdit() {
+    if (!editing) return
+    const op = editing.isNew ? 'create' : 'update'
+    try {
+      const res = await api.commitFiles(ns, {
+        branch: ref,
+        message: 'wip',
+        revision_id: draftRevisionId ?? '',
+        files: [{ path: editing.path, operation: op, content: editing.content }],
+      })
+      setDraft(res.revision_id)
+      draftDirty = true
+      toasts.success(i18n.t('ns.drafted'))
+      const saved = editing.path
+      editing = null
+      openFile = saved.startsWith(scope + '/') && scope ? saved.slice(scope.length + 1) : saved
+      await loadTab()
+      try {
+        blob = await api.blob(ns, ref, fullPath(openFile))
+      } catch {}
+    } catch (e) {
+      toasts.error(String(e))
+    }
+  }
+  // Commit finalises the draft: reword it with the real message and LOCK it
+  // (clear the draft id). Further edits then start a NEW draft.
+  async function commitDraft() {
+    if (!draftRevisionId) return
+    if (!commitMsg.trim()) {
+      toasts.error(i18n.t('ns.commitMessage') + ' *')
+      return
+    }
+    try {
+      await api.commitFiles(ns, { branch: ref, revision_id: draftRevisionId, message: commitMsg.trim(), files: [] })
+      setDraft(null)
+      draftDirty = false
+      committing = false
+      commitMsg = ''
+      toasts.success(i18n.t('ns.committed'))
+      await loadTab()
+    } catch (e) {
+      toasts.error(String(e))
+    }
+  }
+  async function doDeleteFile(p: string) {
+    confirmDelFile = null
+    try {
+      const res = await api.commitFiles(ns, { branch: ref, message: 'wip', revision_id: draftRevisionId ?? '', files: [{ path: p, operation: 'delete' }] })
+      setDraft(res.revision_id)
+      draftDirty = true
+      toasts.success(i18n.t('ns.deletedOk'))
+      blob = null
+      conflict = null
+      await loadTab()
+    } catch (e) {
+      toasts.error(String(e))
+    }
+  }
+  async function doCreateRef() {
+    if (!createRef || !newRefName.trim()) return
+    try {
+      if (createRef === 'branch') {
+        await api.createBranch(ns, newRefName.trim(), ref)
+        toasts.success(i18n.t('ns.branchCreated'))
+      } else {
+        await api.createTag(ns, newRefName.trim(), ref)
+        toasts.success(i18n.t('ns.tagCreated'))
+      }
+      createRef = null
+      newRefName = ''
+      await loadRefs()
+    } catch (e) {
+      toasts.error(String(e))
+    }
+  }
+  async function runSearch() {
+    if (!searchQ.trim()) {
+      searchHits = []
+      return
+    }
+    searching = true
+    try {
+      searchHits = (await api.search(ns, ref, { [searchMode]: searchQ.trim() })).results ?? []
+    } catch (e) {
+      toasts.error(String(e))
+    } finally {
+      searching = false
+    }
+  }
+  function openHit(h: SearchHit) {
+    const dir = h.path.includes('/') ? h.path.slice(0, h.path.lastIndexOf('/')) : ''
+    set({ path: dir })
+    open({ name: h.path.split('/').pop()!, path: h.path, kind: 'file', size: 0, sha: '' })
+  }
+
   $effect(() => {
     ns
     loadMeta()
@@ -167,6 +313,16 @@
     tab
     ref
     loadTab()
+  })
+  // The tree depends on the (route-derived) directory path, so reload it when
+  // the path changes — navigating into a directory otherwise left the old tree.
+  $effect(() => {
+    path
+    if (tab === 'code') loadTree()
+  })
+  $effect(() => {
+    draftKey
+    loadDraft()
   })
 </script>
 
@@ -196,6 +352,13 @@
 {#if err}<p class="mb-3 text-meta text-destructive">{i18n.t('common.error')}: {err}</p>{/if}
 
 {#if tab === 'code'}
+  {#if draftRevisionId}
+    <div class="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2">
+      <span class="text-meta text-warning">● {i18n.t('ns.draft')}</span>
+      <span class="font-mono text-micro text-muted-foreground">{draftRevisionId.slice(0, 8)}{draftDirty ? ' · ' + i18n.t('ns.draftDirty') : ''}</span>
+      <div class="ml-auto"><Button size="sm" onclick={() => (committing = true)}>{i18n.t('ns.commit')}</Button></div>
+    </div>
+  {/if}
   <div class="mb-3 flex flex-wrap items-center gap-2">
     <!-- ref switcher -->
     <div class="relative">
@@ -220,8 +383,43 @@
       {/if}
     </div>
     <span class="text-micro text-muted-foreground">{i18n.t('ns.scope')}</span>
-    <input value={scope} onchange={(e) => setScope((e.target as HTMLInputElement).value)} placeholder={i18n.t('ns.scopePlaceholder')} class="h-8 w-48 rounded-md border border-input bg-secondary px-2 font-mono text-micro sm:w-64" />
+    <input value={scope} onchange={(e) => setScope((e.target as HTMLInputElement).value)} placeholder={i18n.t('ns.scopePlaceholder')} class="h-8 w-40 rounded-md border border-input bg-secondary px-2 font-mono text-micro sm:w-56" />
+    <div class="ml-auto flex flex-wrap items-center gap-2">
+      <Button size="sm" variant="outline" onclick={() => (searchOpen = !searchOpen)}><Search class="size-3.5" /></Button>
+      <Button size="sm" variant="outline" onclick={startNew}><FilePlus class="size-3.5" /> {i18n.t('ns.newFile')}</Button>
+      <Button size="sm" variant="outline" onclick={() => (createRef = 'branch')}><GitBranch class="size-3.5" /> {i18n.t('ns.createBranch')}</Button>
+      <Button size="sm" variant="outline" onclick={() => (createRef = 'tag')}><Tag class="size-3.5" /> {i18n.t('ns.createTag')}</Button>
+    </div>
   </div>
+
+  {#if searchOpen}
+    <div class="mb-3 rounded-lg border border-border bg-card p-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex h-8 items-center gap-2 rounded-md border border-input bg-secondary px-2">
+          <Search class="size-3.5 text-muted-foreground" />
+          <input bind:value={searchQ} onkeydown={(e) => e.key === 'Enter' && runSearch()} placeholder={i18n.t('ns.searchPlaceholder')} class="w-56 bg-transparent text-meta outline-none sm:w-72" />
+        </div>
+        <select bind:value={searchMode} onchange={runSearch} class="h-8 rounded-md border border-input bg-secondary px-2 text-meta">
+          <option value="name">{i18n.t('ns.searchFiles')}</option>
+          <option value="content">{i18n.t('ns.searchContent')}</option>
+        </select>
+        <Button size="sm" onclick={runSearch}>{i18n.t('ns.search')}</Button>
+      </div>
+      {#if searching}<div class="mt-2"><Skeleton lines={2} /></div>
+      {:else if searchHits.length}
+        <ul class="mt-2 overflow-hidden rounded-md border border-border">
+          {#each searchHits as h (h.path + (h.line ?? ''))}
+            <li class="border-b border-border/60 last:border-0">
+              <button onclick={() => openHit(h)} class="block w-full px-2 py-1.5 text-left text-micro hover:bg-secondary">
+                <span class="font-mono text-primary">{h.path}{#if h.line}:{h.line}{/if}</span>
+                {#if h.matches}<span class="ml-2 text-muted-foreground">{h.matches[0]}</span>{/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {:else if searchQ}<p class="mt-2 text-micro text-muted-foreground">{i18n.t('ns.noResults')}</p>{/if}
+    </div>
+  {/if}
 
   <div class="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
     <aside class="overflow-hidden rounded-lg border border-border bg-card">
@@ -247,9 +445,13 @@
               <button onclick={() => set({ path: crumbs.slice(0, i + 1).join('/') })} class="hover:text-foreground">{c}</button>
               <ChevronRight class="size-3" />
             {/each}
-            <span>{path.split('/').pop()}</span>
+            <span>{openFile.split('/').pop()}</span>
             <span class="ml-auto">{fmtSize(blob.size)}</span>
             {#if blob.conflict}<Badge variant="destructive">{i18n.t('ns.conflict')}</Badge>{/if}
+            {#if !blob.conflict && !editing}
+              <button onclick={startEdit} class="text-muted-foreground hover:text-foreground" title={i18n.t('ns.edit')}><Pencil class="size-3.5" /></button>
+              <button onclick={() => (confirmDelFile = path)} class="text-muted-foreground hover:text-destructive" title={i18n.t('ns.deleteFile')}><Trash2 class="size-3.5" /></button>
+            {/if}
           </div>
           {#if blob.conflict && conflict}
             <div class="grid gap-3 p-3" style="grid-template-columns: repeat({Math.min(conflict.terms.length, 3)}, minmax(0, 1fr));">
@@ -278,11 +480,32 @@
               <summary class="cursor-pointer text-micro text-muted-foreground">{i18n.t('ns.markerText')}</summary>
               <pre class="mt-2 overflow-auto font-mono text-micro leading-relaxed">{blob.content}</pre>
             </details>
+          {:else if editing}
+            <div class="p-3">
+              <textarea bind:value={editing.content} rows="14" class="w-full rounded-md border border-input bg-secondary p-3 font-mono text-micro leading-relaxed outline-none focus:border-ring"></textarea>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="text-micro text-muted-foreground">{i18n.t('ns.draftHint')}</span>
+                <Button onclick={saveEdit}>{i18n.t('ns.saveToDraft')}</Button>
+                <Button variant="outline" onclick={() => (editing = null)}>{i18n.t('common.cancel')}</Button>
+              </div>
+            </div>
           {:else if blob.is_text}
             <pre class="overflow-auto p-3 font-mono text-meta leading-relaxed">{@html highlight(blob.content ?? '', extOf(path))}</pre>
           {:else}
             <p class="p-3 text-meta text-muted-foreground">{i18n.t('ns.binaryFile')}</p>
           {/if}
+        </div>
+      {:else if editing}
+        <div class="overflow-hidden rounded-lg border border-border bg-card">
+          <div class="border-b border-border px-3 py-2 text-micro text-muted-foreground">{editing.path}</div>
+          <div class="p-3">
+            <textarea bind:value={editing.content} rows="14" class="w-full rounded-md border border-input bg-secondary p-3 font-mono text-micro leading-relaxed outline-none focus:border-ring"></textarea>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="text-micro text-muted-foreground">{i18n.t('ns.draftHint')}</span>
+              <Button onclick={saveEdit}>{i18n.t('ns.saveToDraft')}</Button>
+              <Button variant="outline" onclick={() => (editing = null)}>{i18n.t('common.cancel')}</Button>
+            </div>
+          </div>
         </div>
       {:else if !path && readme}
         <div class="overflow-hidden rounded-lg border border-border bg-card">
@@ -371,6 +594,16 @@
   {/if}
 {/if}
 
+{#if committing}
+  <Modal title={i18n.t('ns.commit')} onclose={() => (committing = false)}>
+    <p class="mb-2 text-micro text-muted-foreground">{i18n.t('ns.commitHint')}</p>
+    <input bind:value={commitMsg} placeholder={i18n.t('ns.commitMessage')} class="block h-8 w-full rounded-md border border-input bg-secondary px-2 text-meta" />
+    <div class="mt-4 flex justify-end gap-2">
+      <Button variant="outline" onclick={() => (committing = false)}>{i18n.t('common.cancel')}</Button>
+      <Button onclick={commitDraft}>{i18n.t('ns.commit')}</Button>
+    </div>
+  </Modal>
+{/if}
 {#if confirmDel}
   <Confirm
     title={i18n.t('ns.deleteBranch')}
@@ -378,4 +611,24 @@
     onconfirm={() => doDeleteBranch(confirmDel!)}
     oncancel={() => (confirmDel = null)}
   />
+{/if}
+{#if confirmDelFile}
+  <Confirm
+    title={i18n.t('ns.deleteFile')}
+    message={i18n.t('ns.confirmDeleteFile', { path: confirmDelFile })}
+    onconfirm={() => doDeleteFile(confirmDelFile!)}
+    oncancel={() => (confirmDelFile = null)}
+  />
+{/if}
+{#if createRef}
+  <Modal title={createRef === 'branch' ? i18n.t('ns.createBranch') : i18n.t('ns.createTag')} onclose={() => (createRef = null)}>
+    <label class="text-micro text-muted-foreground">{createRef === 'branch' ? i18n.t('ns.branchName') : i18n.t('ns.tagName')}
+      <input bind:value={newRefName} class="mt-1 block h-8 w-full rounded-md border border-input bg-secondary px-2 text-meta" />
+    </label>
+    <p class="mt-2 text-micro text-muted-foreground">{i18n.t('ns.fromRef')}: <span class="font-mono">{ref}</span></p>
+    <div class="mt-4 flex justify-end gap-2">
+      <Button variant="outline" onclick={() => (createRef = null)}>{i18n.t('common.cancel')}</Button>
+      <Button onclick={doCreateRef}>{i18n.t('common.create')}</Button>
+    </div>
+  </Modal>
 {/if}
