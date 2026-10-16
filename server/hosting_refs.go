@@ -106,8 +106,8 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: a token is required"))
 			return
 		}
-		if role, rerr := s.cs.RoleOf(repo.NamespaceID(), u.ID); rerr != nil || !role.CanPush() {
-			writeErr(w, http.StatusForbidden, errors.New("forbidden: a public branch requires write access"))
+		if role, rerr := s.cs.RoleOf(repo.NamespaceID(), u.ID); rerr != nil || !role.CanMerge() {
+			writeErr(w, http.StatusForbidden, errors.New("forbidden: a public branch requires maintainer access"))
 			return
 		}
 	} else {

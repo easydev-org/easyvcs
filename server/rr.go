@@ -81,6 +81,36 @@ func (s *Server) requirePropose(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // requireMerge guards a merge handler with the merge capability.
+// requireMaintain gates an endpoint to owner OR maintainer (CanMerge): the
+// everyday maintenance surface (tags, protection, mirrors, branch sync, public
+// branches, import). Deleting a namespace / changing visibility stays owner-only.
+func (s *Server) requireMaintain(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
+		tk, ok := s.authenticate(r)
+		if !ok {
+			s.auditDenied(r, nil, "bad token")
+			writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: missing or invalid token"))
+			return
+		}
+		// An anonymous caller has no role: 401 (a token is required), matching
+		// the write-gate semantics (not a 403, which means "authenticated but
+		// not allowed").
+		if tk == nil {
+			s.auditDenied(r, nil, "anonymous maintain")
+			writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: a token is required"))
+			return
+		}
+		rref := store.NSRef{Name: nsRefName(r)}
+		if !s.canMerge(rref, tk) {
+			s.auditDenied(r, tk, "no maintain access")
+			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no maintain access to %s", rref))
+			return
+		}
+		next(w, r.WithContext(withToken(r.Context(), tk)))
+	}
+}
+
 func (s *Server) requireMerge(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)

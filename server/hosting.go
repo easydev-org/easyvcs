@@ -97,13 +97,15 @@ func (s *Server) mountHosting(mux *http.ServeMux) {
 	// M3 refs.
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/refs", s.requireRepoAccess(false, s.handleListRefs))
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/branches", s.requireRepoAccess(false, s.handleListBranches))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/branches", s.requireRepoAccess(true, s.handleCreateBranch))
-	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/branches/{branch}", s.requireRepoAccess(true, s.handleDeleteBranch))
+	// POST /branches: READ access is enough to create a PRIVATE branch (the
+	// caller's own scratch); the handler requires WRITE only for a PUBLIC branch.
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/branches", s.requireRepoAccess(false, s.handleCreateBranch))
+	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/branches/{branch}", s.requireMaintain(s.handleDeleteBranch))
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/tags", s.requireRepoAccess(false, s.handleListTags))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/tags", s.requireRepoAccess(true, s.handleCreateTag))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/tags", s.requireMaintain(s.handleCreateTag))
 
 	// M3c branch sync: integrate a base branch into a feature branch.
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/branches/{branch}/sync", s.requireRepoAccess(true, s.handleBranchSync))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/branches/{branch}/sync", s.requireMaintain(s.handleBranchSync))
 
 	// M3b draft (no working copy): apply a file-op set to the caller's PRIVATE
 	// draft branch as a PRIVATE revision. READ access is enough: a draft is the
@@ -119,12 +121,16 @@ func (s *Server) mountHosting(mux *http.ServeMux) {
 
 	// Branch protection (owner-managed).
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/protected-branches", s.requireRepoAccess(false, s.handleGetProtectedBranches))
-	mux.HandleFunc("PUT /api/v1/namespaces/{ns}/protected-branches", s.requireRepoAccess(true, s.handleSetProtectedBranches))
+	mux.HandleFunc("PUT /api/v1/namespaces/{ns}/protected-branches", s.requireMaintain(s.handleSetProtectedBranches))
+	// Members (owner-managed collaborators: maintainer | developer).
+	mux.HandleFunc("GET /api/v1/namespaces/{ns}/members", s.requireRepoAccess(false, s.handleListMembers))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/members", s.requireRepoAccess(false, s.handleAddMember))
+	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/members/{uid}", s.requireRepoAccess(false, s.handleRemoveMember))
 	// push mirrors (owner-managed; list is read).
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/push-mirrors", s.requireRepoAccess(false, s.handleListPushMirrors))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/push-mirrors", s.requireRepoAccess(true, s.handleCreatePushMirror))
-	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/push-mirrors/{mirror}", s.requireRepoAccess(true, s.handleDeletePushMirror))
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/push-mirrors/{mirror}/sync", s.requireRepoAccess(true, s.handleSyncPushMirror))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/push-mirrors", s.requireMaintain(s.handleCreatePushMirror))
+	mux.HandleFunc("DELETE /api/v1/namespaces/{ns}/push-mirrors/{mirror}", s.requireMaintain(s.handleDeletePushMirror))
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/push-mirrors/{mirror}/sync", s.requireMaintain(s.handleSyncPushMirror))
 
 	// M4 browse.
 	mux.HandleFunc("GET /api/v1/namespaces/{ns}/tree", s.requireRepoAccess(false, s.handleTree))

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/easylab-platform/easyvcs/object"
 	"github.com/easylab-platform/easyvcs/revision"
@@ -291,4 +293,106 @@ func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "namespace": ns})
+}
+
+// ---- members (owner-managed collaborators) ----
+
+// handleListMembers lists a namespace's collaborators (owner only).
+func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	_, u, ok := s.currentUser(r)
+	if !ok || u == nil || u.ID != repo.OwnerUserID {
+		writeErr(w, http.StatusForbidden, errors.New("forbidden: only the owner may list members"))
+		return
+	}
+	members, err := s.cs.ListRepoMembers(repo.NamespaceID())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(members))
+	for _, m := range members {
+		name := ""
+		if mu, uerr := s.cs.GetUser(m.UserID); uerr == nil {
+			name = mu.Username
+		}
+		out = append(out, map[string]any{"user_id": m.UserID, "username": name, "role": m.Role})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"members": out, "owner_id": repo.OwnerUserID})
+}
+
+// handleAddMember grants a collaborator role (maintainer|developer) to a user
+// (owner only). The user must already exist.
+func (s *Server) handleAddMember(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	_, u, ok := s.currentUser(r)
+	if !ok || u == nil || u.ID != repo.OwnerUserID {
+		writeErr(w, http.StatusForbidden, errors.New("forbidden: only the owner may manage members"))
+		return
+	}
+	req, err := decodeJSONBody[struct {
+		Username string `json:"username"`
+		UserID   int64  `json:"user_id"`
+		Role     string `json:"role"`
+	}](r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	role := strings.TrimSpace(req.Role)
+	if role != store.RoleMaintainer && role != store.RoleDeveloper {
+		writeErr(w, http.StatusBadRequest, errors.New(`role must be "maintainer" or "developer"`))
+		return
+	}
+	var target *store.User
+	if req.UserID != 0 {
+		target, err = s.cs.GetUser(req.UserID)
+	} else if req.Username != "" {
+		target, err = s.cs.GetUserByUsername(req.Username)
+	} else {
+		writeErr(w, http.StatusBadRequest, errors.New("username or user_id is required"))
+		return
+	}
+	if err != nil || target == nil {
+		writeErr(w, http.StatusNotFound, errors.New("user not found"))
+		return
+	}
+	if target.ID == repo.OwnerUserID {
+		writeErr(w, http.StatusBadRequest, errors.New("the owner is implicitly an owner"))
+		return
+	}
+	if err := s.cs.SetRepoMember(repo.NamespaceID(), target.ID, role, &u.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user_id": target.ID, "username": target.Username, "role": role})
+}
+
+// handleRemoveMember revokes a collaborator role (owner only).
+func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	_, u, ok := s.currentUser(r)
+	if !ok || u == nil || u.ID != repo.OwnerUserID {
+		writeErr(w, http.StatusForbidden, errors.New("forbidden: only the owner may manage members"))
+		return
+	}
+	uid, err := strconv.ParseInt(r.PathValue("uid"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("invalid user id"))
+		return
+	}
+	if err := s.cs.RemoveRepoMember(repo.NamespaceID(), uid); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user_id": uid})
 }
