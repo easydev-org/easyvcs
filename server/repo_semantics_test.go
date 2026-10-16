@@ -201,3 +201,21 @@ func branchTip(mux *http.ServeMux, ns, branch, token string) string {
 	}
 	return ""
 }
+
+// branchSnap returns a branch's TIP SNAPSHOT sha (not the revision id).
+func branchSnap(mux *http.ServeMux, ns, branch, token string) string {
+	rec := hreqRaw(mux, http.MethodGet, "/api/v1/namespaces/"+ns+"/branches", token, nil)
+	var v struct {
+		Branches []struct {
+			Name string `json:"name"`
+			Sha  string `json:"sha"`
+		} `json:"branches"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &v)
+	for _, b := range v.Branches {
+		if b.Name == branch {
+			return b.Sha
+		}
+	}
+	return ""
+}

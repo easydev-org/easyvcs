@@ -22,7 +22,7 @@ func TestDraftStartsFromMainNotRoot(t *testing.T) {
 		t.Fatalf("draft on a new branch must start from main: %d %s", rec.Code, rec.Body.String())
 	}
 	// The draft branch must CONTAIN main's seeded README.md (it started from main).
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=does-not-exist", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=@draft", token, nil)
 	if !has(tr.Body.String(), "README.md") {
 		t.Fatalf("draft must start from main (README.md present): %s", tr.Body.String())
 	}
@@ -111,35 +111,33 @@ func indexOf(s, sub string) int {
 // passes ?allow_conflict=true: 200 (not 409) and main moves.
 func TestRRMergeAllowConflict(t *testing.T) {
 	_, mux, token, repo := hostingTestServer(t)
-	// Seed a file on main, then make a source that conflicts with a main advance.
-	seed := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
-		"branch": "main", "message": "seed",
-		"files": []map[string]any{{"path": "f.txt", "operation": "create", "content": "base\n"}},
-	})
-	_ = seed // main may be protected; use a non-protected branch instead
-	// Use a plain branch to avoid branch protection on main.
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", token,
-		map[string]any{"name": "topic", "from": "main"}); rec.Code != 200 {
-		t.Fatalf("branch: %d %s", rec.Code, rec.Body.String())
-	}
-	// Source snapshot off main's tip, changing f.txt.
+	// main's tip snapshot is the base for the two conflicting proposals.
+	mainTip := branchSnap(mux, "team-app", "main", token)
+	// Source snapshot ON main's tip, changing f.txt to "request".
 	snap := snapshotPost(t, mux, token, map[string]any{
-		"message": "src",
-		"files":   []map[string]any{{"path": "f.txt", "operation": "update", "content": "request\n"}},
+		"message": "src", "parents": []string{mainTip},
+		"files": []map[string]any{{"path": "f.txt", "operation": "create", "content": "request\n"}},
 	})
 	if snap.Code != 200 {
 		t.Fatalf("snapshot: %d %s", snap.Code, snap.Body.String())
 	}
 	src := decode(t, snap)["snapshot"].(string)
-	// Advance topic on the SAME file -> conflict.
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
-		"branch": "topic", "message": "advance",
-		"files": []map[string]any{{"path": "f.txt", "operation": "update", "content": "topic\n"}},
-	}); rec.Code != 200 {
-		t.Fatalf("advance: %d %s", rec.Code, rec.Body.String())
+	// A second proposal ON main's tip changes f.txt to "other"; merge it into
+	// main so main's tip now differs from the RR's base -> a conflict.
+	adv := snapshotPost(t, mux, token, map[string]any{
+		"message": "advance", "parents": []string{mainTip},
+		"files": []map[string]any{{"path": "f.txt", "operation": "create", "content": "other\n"}},
+	})
+	advSnap := decode(t, adv)["snapshot"].(string)
+	advRR := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr", token, map[string]any{
+		"source_snapshot": advSnap, "target_branch": "main", "title": "advance",
+	})
+	advIID := int64(decode(t, advRR)["iid"].(float64))
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr/"+itoa(advIID)+"/merge", token, nil); rec.Code != 200 {
+		t.Fatalf("advance merge: %d %s", rec.Code, rec.Body.String())
 	}
 	rr := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr", token, map[string]any{
-		"source_snapshot": src, "target_branch": "topic", "title": "conflict",
+		"source_snapshot": src, "target_branch": "main", "title": "conflict",
 	})
 	if rr.Code != 200 {
 		t.Fatalf("rr create: %d %s", rr.Code, rr.Body.String())
@@ -162,38 +160,31 @@ func TestRRMergeAllowConflict(t *testing.T) {
 // (base64 `content`), the escape hatch when picking a whole side is not enough.
 func TestRRResolveByContent(t *testing.T) {
 	_, mux, token, _ := hostingTestServer(t)
-	// Seed a binary file on a branch, then create a conflicting RR.
 	bin := func(s byte) string {
 		return base64.StdEncoding.EncodeToString([]byte{0x89, 'P', 'N', 'G', 0, 0, s, 0xff})
 	}
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
-		"branch": "topic", "message": "seed",
-		"files": []map[string]any{{"path": "logo.png", "operation": "create", "content_bytes": bin(1)}},
-	}); rec.Code != 200 {
-		// branch "topic" may not exist yet -> create from main first.
-		if r2 := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", token,
-			map[string]any{"name": "topic", "from": "main"}); r2.Code != 200 {
-			t.Fatalf("branch: %d %s", r2.Code, r2.Body.String())
-		}
-		if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
-			"branch": "topic", "message": "seed",
-			"files": []map[string]any{{"path": "logo.png", "operation": "create", "content_bytes": bin(1)}},
-		}); rec.Code != 200 {
-			t.Fatalf("seed commit: %d %s", rec.Code, rec.Body.String())
-		}
-	}
+	mainTip := branchSnap(mux, "team-app", "main", token)
+	// A source proposal ON main's tip adds logo.png (bin 2).
 	snap := snapshotPost(t, mux, token, map[string]any{
-		"message": "src", "files": []map[string]any{{"path": "logo.png", "operation": "update", "content_bytes": bin(2)}},
+		"message": "src", "parents": []string{mainTip},
+		"files": []map[string]any{{"path": "logo.png", "operation": "create", "content_bytes": bin(2)}},
 	})
 	src := decode(t, snap)["snapshot"].(string)
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
-		"branch": "topic", "message": "advance",
-		"files": []map[string]any{{"path": "logo.png", "operation": "update", "content_bytes": bin(3)}},
-	}); rec.Code != 200 {
-		t.Fatalf("advance: %d %s", rec.Code, rec.Body.String())
-	}
+	// A competing proposal ON main's tip adds logo.png (bin 3); merge it into main
+	// so the RR's base no longer matches -> a binary conflict.
+	adv := snapshotPost(t, mux, token, map[string]any{
+		"message": "advance", "parents": []string{mainTip},
+		"files": []map[string]any{{"path": "logo.png", "operation": "create", "content_bytes": bin(3)}},
+	})
+	advSnap := decode(t, adv)["snapshot"].(string)
+	advRR := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr", token, map[string]any{
+		"source_snapshot": advSnap, "target_branch": "main", "title": "advance",
+	})
+	advIID := int64(decode(t, advRR)["iid"].(float64))
+	hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr/"+itoa(advIID)+"/merge", token, nil)
+
 	rr := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/rr", token, map[string]any{
-		"source_snapshot": src, "target_branch": "topic", "title": "binary conflict",
+		"source_snapshot": src, "target_branch": "main", "title": "binary conflict",
 	})
 	iid := int64(decode(t, rr)["iid"].(float64))
 	// Force the pending conflicted merge.

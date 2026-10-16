@@ -39,11 +39,10 @@ func newBranch(t *testing.T, repo *store.Repo, name string) {
 func has(s, sub string) bool { return strings.Contains(s, sub) }
 
 func TestCommitCreateAndReadBack(t *testing.T) {
-	_, mux, token, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/x")
+	_, mux, token, _ := hostingTestServer(t)
 
 	rec := commitPost(t, mux, token, map[string]any{
-		"branch": "feature/x", "message": "add files",
+		"target": "main", "message": "add files",
 		"files": []map[string]any{
 			{"path": "a.txt", "operation": "create", "content": "hello\n"},
 			{"path": "sub/b.txt", "operation": "create", "content": "world\n"},
@@ -52,7 +51,7 @@ func TestCommitCreateAndReadBack(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body.String())
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=feature/x&path=sub", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=@draft&path=sub", token, nil)
 	if tr.Code != http.StatusOK {
 		t.Fatalf("tree: %d %s", tr.Code, tr.Body.String())
 	}
@@ -65,7 +64,7 @@ func TestCommitCreateAndReadBack(t *testing.T) {
 	if len(tv.Entries) != 1 || tv.Entries[0].Path != "sub/b.txt" {
 		t.Fatalf("tree entries = %+v, want sub/b.txt", tv.Entries)
 	}
-	bl := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/blob?ref=feature/x&path=a.txt", token, nil)
+	bl := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/blob?ref=@draft&path=a.txt", token, nil)
 	if bl.Code != http.StatusOK || !has(bl.Body.String(), "hello") {
 		t.Fatalf("blob a.txt: %d %s", bl.Code, bl.Body.String())
 	}
@@ -76,12 +75,11 @@ func TestCommitCreateAndReadBack(t *testing.T) {
 }
 
 func TestCommitBinaryRoundTrip(t *testing.T) {
-	_, mux, token, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/bin")
+	_, mux, token, _ := hostingTestServer(t)
 
 	raw := []byte{0x00, 0x01, 0x02, 0xff, 0xfe, 0x7f, 0x80}
 	rec := commitPost(t, mux, token, map[string]any{
-		"branch": "feature/bin", "message": "add bin",
+		"target": "main", "message": "add bin",
 		"files": []map[string]any{
 			{"path": "blob.bin", "operation": "create", "content_bytes": base64.StdEncoding.EncodeToString(raw)},
 		},
@@ -89,7 +87,7 @@ func TestCommitBinaryRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body.String())
 	}
-	rawRec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/raw?ref=feature/bin&path=blob.bin", token, nil)
+	rawRec := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/raw?ref=@draft&path=blob.bin", token, nil)
 	if rawRec.Code != http.StatusOK {
 		t.Fatalf("raw: %d %s", rawRec.Code, rawRec.Body.String())
 	}
@@ -99,22 +97,21 @@ func TestCommitBinaryRoundTrip(t *testing.T) {
 }
 
 func TestCommitDelete(t *testing.T) {
-	_, mux, token, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/del")
+	_, mux, token, _ := hostingTestServer(t)
 
 	if rec := commitPost(t, mux, token, map[string]any{
-		"branch": "feature/del", "message": "add",
+		"target": "main", "message": "add",
 		"files": []map[string]any{{"path": "gone.txt", "operation": "create", "content": "x\n"}},
 	}); rec.Code != http.StatusOK {
 		t.Fatalf("add: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := commitPost(t, mux, token, map[string]any{
-		"branch": "feature/del", "message": "del",
+		"target": "main", "message": "del",
 		"files": []map[string]any{{"path": "gone.txt", "operation": "delete"}},
 	}); rec.Code != http.StatusOK {
 		t.Fatalf("del: %d %s", rec.Code, rec.Body.String())
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=feature/del", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=@draft", token, nil)
 	if has(tr.Body.String(), "gone.txt") {
 		t.Fatalf("gone.txt should be deleted: %s", tr.Body.String())
 	}
@@ -128,7 +125,7 @@ func TestDraftOnProtectedBranchIsPrivate(t *testing.T) {
 	// A private draft uses its OWN branch name (the webui uses "@draft/main");
 	// the PUBLIC main is never targeted.
 	rec := commitPost(t, mux, token, map[string]any{
-		"branch": "@draft/main", "message": "private wip",
+		"target": "main", "message": "private wip",
 		"files": []map[string]any{{"path": "x.txt", "operation": "create", "content": "x\n"}},
 	})
 	if rec.Code != http.StatusOK {
@@ -144,10 +141,9 @@ func TestDraftOnProtectedBranchIsPrivate(t *testing.T) {
 
 func TestCommitStaleParentConflict(t *testing.T) {
 	_, mux, token, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/stale")
 
 	if rec := commitPost(t, mux, token, map[string]any{
-		"branch": "feature/stale", "message": "c1",
+		"target": "main", "message": "c1",
 		"files": []map[string]any{{"path": "a.txt", "operation": "create", "content": "1\n"}},
 	}); rec.Code != http.StatusOK {
 		t.Fatalf("c1: %d %s", rec.Code, rec.Body.String())
@@ -157,7 +153,7 @@ func TestCommitStaleParentConflict(t *testing.T) {
 	mainRef, _ := ws.GetRef("main")
 	mainRev, _ := repo.GetRevision(mainRef.Target)
 	rec := commitPost(t, mux, token, map[string]any{
-		"branch": "feature/stale", "message": "c2",
+		"target": "main", "message": "c2",
 		"parents": []string{mainRev.Hash.String()},
 		"files":   []map[string]any{{"path": "b.txt", "operation": "create", "content": "2\n"}},
 	})
@@ -168,10 +164,9 @@ func TestCommitStaleParentConflict(t *testing.T) {
 
 func TestCommitAmendAccumulates(t *testing.T) {
 	_, mux, token, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/amend")
 
 	rec := commitPost(t, mux, token, map[string]any{
-		"branch": "feature/amend", "message": "staging",
+		"target": "main", "message": "staging",
 		"files": []map[string]any{{"path": "a.txt", "operation": "create", "content": "a\n"}},
 	})
 	if rec.Code != http.StatusOK {
@@ -183,7 +178,7 @@ func TestCommitAmendAccumulates(t *testing.T) {
 	}
 	// Same revision_id -> amend, add another file.
 	rec = commitPost(t, mux, token, map[string]any{
-		"branch": "feature/amend", "message": "staging", "revision_id": revID,
+		"target": "main", "message": "staging", "revision_id": revID,
 		"files": []map[string]any{{"path": "b.txt", "operation": "create", "content": "b\n"}},
 	})
 	if rec.Code != http.StatusOK {
@@ -192,13 +187,14 @@ func TestCommitAmendAccumulates(t *testing.T) {
 	if got, _ := decode(t, rec)["revision_id"].(string); got != revID {
 		t.Fatalf("amend changed revision id: %s != %s", got, revID)
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=feature/amend", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=@draft", token, nil)
 	if !has(tr.Body.String(), "a.txt") || !has(tr.Body.String(), "b.txt") {
 		t.Fatalf("amend must accumulate both files: %s", tr.Body.String())
 	}
-	// No extra revision beyond the branch's derived base + the amended one.
+	// The draft is ONE revision (amended in place): the repo has the seeded
+	// base commit + the single draft revision.
 	revs, _ := repo.ListRevisions()
-	if len(revs) != 3 {
+	if len(revs) != 2 {
 		t.Fatalf("amend must not create extra revisions, got %d", len(revs))
 	}
 	// ChangedPaths of the amended revision reflects BOTH files (vs its parent).
@@ -211,10 +207,9 @@ func TestCommitAmendAccumulates(t *testing.T) {
 
 func TestCommitReword(t *testing.T) {
 	_, mux, token, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/reword")
 
 	rec := commitPost(t, mux, token, map[string]any{
-		"branch": "feature/reword", "message": "draft",
+		"target": "main", "message": "draft",
 		"files": []map[string]any{{"path": "a.txt", "operation": "create", "content": "a\n"}},
 	})
 	revID, _ := decode(t, rec)["revision_id"].(string)
@@ -222,7 +217,7 @@ func TestCommitReword(t *testing.T) {
 	oldSnap, _ := repo.GetSnapshot(oldRev.Hash)
 
 	rec = commitPost(t, mux, token, map[string]any{
-		"branch": "feature/reword", "message": "final message", "revision_id": revID,
+		"target": "main", "message": "final message", "revision_id": revID,
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reword: %d %s", rec.Code, rec.Body.String())
@@ -241,27 +236,25 @@ func TestCommitReword(t *testing.T) {
 }
 
 func TestCommitEmptyFilesWithoutRevisionIs400(t *testing.T) {
-	_, mux, token, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/empty")
-	rec := commitPost(t, mux, token, map[string]any{"branch": "feature/empty", "message": "noop", "files": []map[string]any{}})
+	_, mux, token, _ := hostingTestServer(t)
+	rec := commitPost(t, mux, token, map[string]any{"target": "main", "message": "noop", "files": []map[string]any{}})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("empty files without revision_id should be 400, got %d %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestCommitUnsafePathRejected(t *testing.T) {
-	_, mux, token, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/unsafe")
+	_, mux, token, _ := hostingTestServer(t)
 	for _, p := range []string{"../escape.txt", "/abs.txt", "a/../../b.txt", "a/./b.txt", "a\\b.txt"} {
 		rec := commitPost(t, mux, token, map[string]any{
-			"branch": "feature/unsafe", "message": "bad",
+			"target": "main", "message": "bad",
 			"files": []map[string]any{{"path": p, "operation": "create", "content": "x\n"}},
 		})
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("unsafe path %q should be 400, got %d %s", p, rec.Code, rec.Body.String())
 		}
 	}
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=feature/unsafe", token, nil)
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=@draft", token, nil)
 	if has(tr.Body.String(), "escape.txt") {
 		t.Fatalf("unsafe commit must not land: %s", tr.Body.String())
 	}
@@ -273,11 +266,10 @@ func TestCommitUnsafePathRejected(t *testing.T) {
 // write one (no write role needed), but an anonymous caller may not, and one
 // user's private draft is invisible to another.
 func TestDraftAllowsAnyReader(t *testing.T) {
-	s, mux, _, repo := hostingTestServer(t)
-	newBranch(t, repo, "feature/auth")
+	s, mux, _, _ := hostingTestServer(t)
 
 	anon := commitPost(t, mux, "", map[string]any{
-		"branch": "feature/auth", "message": "x",
+		"target": "main", "message": "x",
 		"files": []map[string]any{{"path": "a.txt", "operation": "create", "content": "a\n"}},
 	})
 	if anon.Code != http.StatusUnauthorized {
@@ -295,20 +287,20 @@ func TestDraftAllowsAnyReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", tok, map[string]any{
-		"branch": "outsider-secret", "message": "x",
+		"target": "main", "message": "x",
 		"files": []map[string]any{{"path": "a.txt", "operation": "create", "content": "a\n"}},
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a reader may create a private draft, got %d %s", rec.Code, rec.Body.String())
 	}
-	// The outsider's PRIVATE draft branch is invisible to tester (the owner).
-	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches", "alice-token", nil)
-	if has(tr.Body.String(), "outsider-secret") {
-		t.Fatalf("tester must not see the outsider's private draft: %s", tr.Body.String())
-	}
-	// But the outsider SEES their own draft.
-	tr2 := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches", tok, nil)
-	if !has(tr2.Body.String(), "outsider-secret") {
+	// Each user's draft is the SAME fixed name "@draft": the outsider sees theirs,
+	// and the outsider's content (a.txt) is invisible to tester.
+	tr2 := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=@draft", tok, nil)
+	if !has(tr2.Body.String(), "a.txt") {
 		t.Fatalf("the outsider must see their own draft: %s", tr2.Body.String())
+	}
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=@draft", "alice-token", nil)
+	if has(tr.Body.String(), "a.txt") {
+		t.Fatalf("tester must NOT see the outsider's draft content: %s", tr.Body.String())
 	}
 }

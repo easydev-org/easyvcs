@@ -46,9 +46,9 @@
   let committing = $state(false)
   let commitMsg = $state('')
   const draftKey = $derived('easyvcsDraft:' + ns + ':' + ref)
-  // The PRIVATE draft branch name (fixed; private refs never shadow the public
-  // branch of the same name in RR targets, which read the PUBLIC ref).
-  const draftBranch = $derived('@draft/' + ref)
+  // The DRAFT is the caller's SINGLE fixed-name private branch '@draft' (one per
+  // user per namespace); `ref` is the TARGET the draft proposes to.
+  const draftBranch = '@draft'
   let confirmDelFile = $state<string | null>(null)
   let createRef = $state<'branch' | 'tag' | null>(null)
   let newRefName = $state('')
@@ -217,7 +217,7 @@
     const op = editing.isNew ? 'create' : 'update'
     try {
       const res = await api.draftFiles(ns, {
-        branch: draftBranch,
+        target: ref,
         message: 'wip',
         revision_id: draftRevisionId ?? '',
         files: [{ path: editing.path, operation: op, content: editing.content }],
@@ -248,7 +248,7 @@
     }
     try {
       // 1) reword the draft with the real message; it returns the snapshot.
-      const r = await api.draftFiles(ns, { branch: draftBranch, revision_id: draftRevisionId, message: commitMsg.trim(), files: [] })
+      const r = await api.draftFiles(ns, { target: ref, revision_id: draftRevisionId, message: commitMsg.trim(), files: [] })
       // 2) open a Revision Request from the draft snapshot to the target branch.
       const rr = await api.rrCreate(ns, { source_snapshot: r.snapshot, target_branch: ref, title: commitMsg.trim(), body: '' })
       setDraft(null)
@@ -266,7 +266,7 @@
   async function doDeleteFile(p: string) {
     confirmDelFile = null
     try {
-      const res = await api.draftFiles(ns, { branch: draftBranch, message: 'wip', revision_id: draftRevisionId ?? '', files: [{ path: p, operation: 'delete' }] })
+      const res = await api.draftFiles(ns, { target: ref, message: 'wip', revision_id: draftRevisionId ?? '', files: [{ path: p, operation: 'delete' }] })
       setDraft(res.revision_id)
       draftDirty = true
       toasts.success(i18n.t('ns.deletedOk'))

@@ -152,13 +152,13 @@ export class Api {
   draftFiles = (
     ns: string,
     body: {
-      branch: string
+      target: string
       message: string
       revision_id?: string
       files: { path: string; operation: string; content?: string }[]
     },
   ) =>
-    this.req<{ ok: boolean; branch: string; revision_id: string; snapshot: string; private?: boolean }>(
+    this.req<{ ok: boolean; draft: string; target: string; revision_id: string; snapshot: string; private?: boolean }>(
       `/api/v1/namespaces/${ns}/draft`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     )

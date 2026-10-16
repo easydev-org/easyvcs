@@ -52,7 +52,7 @@ func hostingTestServerWithDirs(t *testing.T, dirs ...string) (*Server, *http.Ser
 	if _, err := ws.SetRef("main", store.RefBranch, rev.ID); err != nil {
 		t.Fatal(err)
 	}
-	return s, s.Router(), "alice-token", repo
+	return s, s.Router(), "alice-token", repo.WithViewer(u.ID)
 }
 
 func refNamesIn(t *testing.T, m map[string]any, key string) map[string]bool {
@@ -174,7 +174,7 @@ func TestCommitWithPathLifts(t *testing.T) {
 	// Commit a change to frontend/app.ts (path-relative), on feature.
 	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft?path=frontend", tok,
 		map[string]any{
-			"branch":  "feature",
+			"target":  "feature",
 			"message": "edit frontend",
 			"files":   []map[string]any{{"path": "app.ts", "operation": "create", "content": "v2\n"}},
 		})
@@ -185,9 +185,10 @@ func TestCommitWithPathLifts(t *testing.T) {
 	if resp["path"] != "frontend" {
 		t.Fatalf("response path = %v", resp["path"])
 	}
-	// The root main tip now has frontend/app.ts; backend is untouched.
+	// The draft tip now has frontend/app.ts; backend is untouched. The returned
+	// repo handle is viewer-scoped to the owner, so the private @draft is visible.
 	ws := revision.NewWorkspace(repo)
-	ref, err := ws.GetRef("feature")
+	ref, err := ws.GetRef("@draft")
 	if err != nil {
 		t.Fatal(err)
 	}

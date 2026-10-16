@@ -360,8 +360,15 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 // PRIVATE draft revision on a PRIVATE branch. No revision_id => create a NEW
 // draft; with revision_id => amend the caller's own draft. The draft branch and
 // revision are visible ONLY to the caller until they open a Revision Request.
+// DraftRefName is the FIXED name of every user's draft branch: a draft IS a
+// private branch with this name, so each user has exactly ONE draft per
+// namespace (a draft and a private branch are the SAME mechanism).
+const DraftRefName = "@draft"
+
 type draftReq struct {
-	Branch     string             `json:"branch"`
+	// Target is the branch the draft proposes to (the RR target, e.g. "main").
+	// The draft itself is always DraftRefName.
+	Target     string             `json:"target"`
 	Message    string             `json:"message"`
 	RevisionID string             `json:"revision_id"`
 	Author     *store.Author      `json:"author"`
@@ -392,10 +399,11 @@ func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	req.Branch = strings.TrimSpace(req.Branch)
-	if req.Branch == "" {
-		writeErr(w, http.StatusBadRequest, errors.New("branch is required"))
-		return
+	// The draft always lives at DraftRefName; Target names the branch it will
+	// eventually propose to (defaults to the namespace's default branch).
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		target = "main"
 	}
 	if strings.TrimSpace(req.Message) == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("message is required"))
@@ -425,14 +433,20 @@ func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
 		var lrev *store.Revision
 		var lsnap *store.Snapshot
 		lerr := s.withRepoLock(repo, func() error {
-			ns, rv, e := ws.Lift(req.Branch, scope, changes, req.Message, author)
+			// Lift onto the DRAFT, whose base is the target branch (or the draft's
+			// own private tip when it already exists).
+			liftBase := DraftRefName
+			if dr, derr := repo.GetRefIn("", DraftRefName); derr != nil || dr == nil || dr.OwnerUserID != u.ID {
+				liftBase = target
+			}
+			ns, rv, e := ws.Lift(liftBase, scope, changes, req.Message, author)
 			if e != nil {
 				return e
 			}
 			if err := repo.SetRevisionOwner(rv.ID, u.ID); err != nil {
 				return err
 			}
-			if e := repo.PutRef(&store.Ref{Name: req.Branch, Kind: store.RefBranch, Target: rv.ID, OwnerUserID: u.ID}); e != nil {
+			if e := repo.PutRef(&store.Ref{Name: DraftRefName, Kind: store.RefBranch, Target: rv.ID, OwnerUserID: u.ID}); e != nil {
 				return e
 			}
 			lsnap, lrev = ns, rv
@@ -442,18 +456,18 @@ func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, lerr)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "branch": req.Branch, "path": scope, "revision_id": lrev.ID, "snapshot": lsnap.RevisionHash.String(), "private": true})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "draft": DraftRefName, "target": target, "path": scope, "revision_id": lrev.ID, "snapshot": lsnap.RevisionHash.String(), "private": true})
 		return
 	}
 	// Resolve the draft's BASE: the caller's private draft tip if present, else
 	// the PUBLIC branch tip of the same name (the draft starts from the shared
 	// branch, then diverges privately).
-	draftRef, derr := repo.GetRefIn("", req.Branch)
+	draftRef, derr := repo.GetRefIn("", DraftRefName)
 	var draftTip string
 	if derr == nil && draftRef != nil && draftRef.OwnerUserID == u.ID {
 		draftTip = draftRef.Target
 	}
-	publicRef, perr := repo.GetRefIn("", req.Branch) // viewer-scoped: may return the private one
+	publicRef, perr := repo.GetRefIn("", DraftRefName) // viewer-scoped: may return the private one
 	_ = publicRef
 	_ = perr
 	var rev *store.Revision
@@ -479,13 +493,9 @@ func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
 			}
 			baseHash = cur
 		default:
-			// Start the draft from the PUBLIC branch of the same name if it
-			// exists, else from the default branch.
-			startName := req.Branch
-			if pub, gerr := repo.GetRefIn("", req.Branch); gerr == nil && pub != nil && pub.OwnerUserID == 0 {
-				startName = req.Branch
-			} else if mainRef, merr := repo.GetRefIn("", "main"); merr == nil && mainRef != nil {
-				_ = mainRef
+			// Start the draft from the PUBLIC target branch (else main).
+			startName := target
+			if pub, gerr := repo.GetRefIn("", target); gerr != nil || pub == nil || pub.OwnerUserID != 0 {
 				startName = "main"
 			}
 			if r, gerr := repo.GetRefIn("", startName); gerr == nil && r != nil {
@@ -515,7 +525,7 @@ func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
 		}
 		newRev.OwnerUserID = u.ID
 		// Point the PRIVATE branch at it (owner = caller).
-		if serr := repo.PutRef(&store.Ref{Name: req.Branch, Kind: store.RefBranch, Target: newRev.ID, OwnerUserID: u.ID}); serr != nil {
+		if serr := repo.PutRef(&store.Ref{Name: DraftRefName, Kind: store.RefBranch, Target: newRev.ID, OwnerUserID: u.ID}); serr != nil {
 			return serr
 		}
 		snap, rev = newSnap, newRev
@@ -529,9 +539,9 @@ func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "stale", "message": conflict})
 		return
 	}
-	s.auditOK(r, tokenFrom(r.Context()), fmt.Sprintf("draft branch=%s rev=%s", req.Branch, rev.ID))
+	s.auditOK(r, tokenFrom(r.Context()), fmt.Sprintf("draft rev=%s", rev.ID))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "branch": req.Branch, "revision_id": rev.ID, "snapshot": snap.RevisionHash.String(),
+		"ok": true, "draft": DraftRefName, "target": target, "revision_id": rev.ID, "snapshot": snap.RevisionHash.String(),
 		"private": true,
 	})
 }
