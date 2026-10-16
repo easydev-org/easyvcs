@@ -46,6 +46,9 @@
   let committing = $state(false)
   let commitMsg = $state('')
   const draftKey = $derived('easyvcsDraft:' + ns + ':' + ref)
+  // The PRIVATE draft branch name (fixed; private refs never shadow the public
+  // branch of the same name in RR targets, which read the PUBLIC ref).
+  const draftBranch = $derived('@draft/' + ref)
   let confirmDelFile = $state<string | null>(null)
   let createRef = $state<'branch' | 'tag' | null>(null)
   let newRefName = $state('')
@@ -213,8 +216,8 @@
     if (!editing) return
     const op = editing.isNew ? 'create' : 'update'
     try {
-      const res = await api.commitFiles(ns, {
-        branch: ref,
+      const res = await api.draftFiles(ns, {
+        branch: draftBranch,
         message: 'wip',
         revision_id: draftRevisionId ?? '',
         files: [{ path: editing.path, operation: op, content: editing.content }],
@@ -233,8 +236,10 @@
       toasts.error(String(e))
     }
   }
-  // Commit finalises the draft: reword it with the real message and LOCK it
-  // (clear the draft id). Further edits then start a NEW draft.
+  // Commit finalises the draft by opening a REVISION REQUEST from it to the
+  // target branch. There is no direct public write: the draft is private, and
+  // the ONLY way its content reaches the shared branch is a merged RR. After the
+  // RR is opened the draft is LOCKED (further edits start a new draft).
   async function commitDraft() {
     if (!draftRevisionId) return
     if (!commitMsg.trim()) {
@@ -242,13 +247,18 @@
       return
     }
     try {
-      await api.commitFiles(ns, { branch: ref, revision_id: draftRevisionId, message: commitMsg.trim(), files: [] })
+      // 1) reword the draft with the real message; it returns the snapshot.
+      const r = await api.draftFiles(ns, { branch: draftBranch, revision_id: draftRevisionId, message: commitMsg.trim(), files: [] })
+      // 2) open a Revision Request from the draft snapshot to the target branch.
+      const rr = await api.rrCreate(ns, { source_snapshot: r.snapshot, target_branch: ref, title: commitMsg.trim(), body: '' })
       setDraft(null)
       draftDirty = false
       committing = false
       commitMsg = ''
-      toasts.success(i18n.t('ns.committed'))
+      toasts.success(i18n.t('ns.rrOpened', { iid: rr.iid }))
       await loadTab()
+      // Jump to the new request.
+      set({ tab: 'requests', iid: String(rr.iid) })
     } catch (e) {
       toasts.error(String(e))
     }
@@ -256,7 +266,7 @@
   async function doDeleteFile(p: string) {
     confirmDelFile = null
     try {
-      const res = await api.commitFiles(ns, { branch: ref, message: 'wip', revision_id: draftRevisionId ?? '', files: [{ path: p, operation: 'delete' }] })
+      const res = await api.draftFiles(ns, { branch: draftBranch, message: 'wip', revision_id: draftRevisionId ?? '', files: [{ path: p, operation: 'delete' }] })
       setDraft(res.revision_id)
       draftDirty = true
       toasts.success(i18n.t('ns.deletedOk'))

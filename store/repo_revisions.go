@@ -172,6 +172,7 @@ func (r *Repo) toRevisionRow(rev *Revision) *revisionRow {
 	return &revisionRow{
 		NamespaceID: r.namespaceID, ID: rev.ID, Hash: rev.Hash.String(),
 		Created: rev.Created.UnixMilli(), ForkFrom: rev.ForkFrom, ChangedPath: changed,
+		OwnerUserID: rev.OwnerUserID,
 	}
 }
 
@@ -233,6 +234,7 @@ func (r *Repo) fromRevisionRow(row *revisionRow) (*Revision, error) {
 	return &Revision{
 		ID: row.ID, Hash: cur, Created: time.UnixMilli(row.Created),
 		ForkFrom: row.ForkFrom, ChangedPaths: decodeChangedPathsJSON(row.ChangedPath),
+		OwnerUserID: row.OwnerUserID,
 	}, nil
 }
 
@@ -267,7 +269,7 @@ func (r *Repo) UpdateRevisionHashCAS(revisionID string, expectHash, newHash obje
 // ListRevisions lists revisions scoped to this repository.
 func (r *Repo) ListRevisions() ([]*Revision, error) {
 	var rows []revisionRow
-	if err := r.cs.d.gdb.Where("namespace_id=?", r.namespaceID).Order("id").Find(&rows).Error; err != nil {
+	if err := r.cs.d.gdb.Where("namespace_id=? AND (owner_user_id=0 OR owner_user_id=?)", r.namespaceID, r.viewerUserID).Order("id").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*Revision, 0, len(rows))
@@ -279,4 +281,12 @@ func (r *Repo) ListRevisions() ([]*Revision, error) {
 		out = append(out, rev)
 	}
 	return out, nil
+}
+
+// SetRevisionOwner marks a revision PRIVATE (owner != 0) or public (0). Used to
+// stamp a draft revision with its author so it is visible only to them.
+func (r *Repo) SetRevisionOwner(id string, owner int64) error {
+	return r.cs.d.gdb.Model(&revisionRow{}).
+		Where("namespace_id=? AND id=?", r.namespaceID, id).
+		Update("owner_user_id", owner).Error
 }

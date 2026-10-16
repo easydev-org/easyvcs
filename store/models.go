@@ -92,6 +92,10 @@ type revisionRow struct {
 	Created     int64  `gorm:"not null"`
 	ForkFrom    string
 	ChangedPath []byte `gorm:"column:changed_paths"`
+	// OwnerUserID marks a PRIVATE revision (a draft): 0 = public, non-zero =
+	// visible ONLY to that user. A draft revision is not shown to others and is
+	// not transferable until it becomes an RR source.
+	OwnerUserID int64 `gorm:"not null;default:0"`
 }
 
 // revisionPathDirRow indexes which DIRECTORY prefixes a revision touched: for
@@ -117,10 +121,14 @@ type refRow struct {
 	// Path is the SCOPE this ref belongs to ("" = the root scope). A ref lives
 	// in exactly one scope; the root scope's refs project down to sub-scopes
 	// (see docs/subrepo-scopes.md).
-	Path   string `gorm:"primaryKey;not null;default:''"`
-	Name   string `gorm:"primaryKey;not null"`
-	Kind   string `gorm:"not null"`
-	Target string `gorm:"not null"`
+	Path string `gorm:"primaryKey;not null;default:''"`
+	Name string `gorm:"primaryKey;not null"`
+	// OwnerUserID is part of the KEY: 0 = a PUBLIC ref (everyone with read
+	// access sees it); non-zero = a PRIVATE ref visible ONLY to that user (a
+	// private branch / draft). Two users may each own a same-named private ref.
+	OwnerUserID int64  `gorm:"primaryKey;not null;default:0"`
+	Kind        string `gorm:"not null"`
+	Target      string `gorm:"not null"`
 }
 
 // workspaces table.

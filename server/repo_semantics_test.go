@@ -111,10 +111,17 @@ func TestCreateRepoInitSeedsMain(t *testing.T) {
 	}
 	// main is still PROTECTED: a direct commit is refused (bootstrap did not
 	// relax protection).
-	commit := hreqRaw(mux, http.MethodPost, "/api/v1/namespaces/team-seeded/commit", "secret",
-		map[string]any{"branch": "main", "message": "x", "files": []any{map[string]any{"path": "a.txt", "operation": "create", "content": "x"}}})
-	if commit.Code != http.StatusForbidden {
-		t.Fatalf("direct commit to seeded main: got %d %s, want 403", commit.Code, commit.Body.String())
+	// There is no direct public write: a draft is PRIVATE (a private branch),
+	// so the PUBLIC main's tree is unchanged. (A draft that names "main" is a
+	// private ref shadowing main for its owner only.)
+	beforeTip := branchTip(mux, "team-seeded", "main", "secret")
+	commit := hreqRaw(mux, http.MethodPost, "/api/v1/namespaces/team-seeded/draft", "secret",
+		map[string]any{"branch": "@draft/main", "message": "x", "files": []any{map[string]any{"path": "a.txt", "operation": "create", "content": "x"}}})
+	if commit.Code != http.StatusOK {
+		t.Fatalf("private draft: got %d %s, want 200", commit.Code, commit.Body.String())
+	}
+	if afterTip := branchTip(mux, "team-seeded", "main", "secret"); afterTip != beforeTip {
+		t.Fatalf("public main must not move on a draft: %s -> %s", beforeTip, afterTip)
 	}
 
 	// Default (no init) => empty repo (no refs), unchanged behaviour.
@@ -175,4 +182,22 @@ func TestListReposOwnedAndDefaultPrivate(t *testing.T) {
 	if !bytes.Contains(all.Body.Bytes(), []byte("otherorg")) {
 		t.Fatalf("legacy list should include public repos: %s", all.Body.String())
 	}
+}
+
+// branchTip returns a branch's tip target for a namespace, or "" if absent.
+func branchTip(mux *http.ServeMux, ns, branch, token string) string {
+	rec := hreqRaw(mux, http.MethodGet, "/api/v1/namespaces/"+ns+"/branches", token, nil)
+	var v struct {
+		Branches []struct {
+			Name   string `json:"name"`
+			Target string `json:"target"`
+		} `json:"branches"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &v)
+	for _, b := range v.Branches {
+		if b.Name == branch {
+			return b.Target
+		}
+	}
+	return ""
 }

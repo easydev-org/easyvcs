@@ -172,7 +172,7 @@ func TestCommitWithPathLifts(t *testing.T) {
 		t.Fatalf("create feature = %d %s", rec.Code, rec.Body.String())
 	}
 	// Commit a change to frontend/app.ts (path-relative), on feature.
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit?path=frontend", tok,
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft?path=frontend", tok,
 		map[string]any{
 			"branch":  "feature",
 			"message": "edit frontend",
@@ -212,7 +212,7 @@ func TestCommitWithoutPathUnchanged(t *testing.T) {
 		map[string]any{"name": "feature", "from": "main"}); rec.Code != 200 {
 		t.Fatalf("create feature = %d %s", rec.Code, rec.Body.String())
 	}
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", tok,
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", tok,
 		map[string]any{
 			"branch":  "feature",
 			"message": "root edit",

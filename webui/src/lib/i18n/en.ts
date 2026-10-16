@@ -62,6 +62,7 @@ export const en = {
     drafted: 'saved to draft',
     commit: 'Commit',
     commitHint: 'This finalises the draft into a revision; further edits start a new draft.',
+    rrOpened: 'opened revision request #{iid}',
     committed: 'committed',
     draftHint: 'Saves into the draft revision (commit it later)',
     saveToDraft: 'Save to draft',

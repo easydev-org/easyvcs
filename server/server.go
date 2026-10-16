@@ -388,6 +388,13 @@ func (s *Server) repo(w http.ResponseWriter, r *http.Request) (*store.Repo, bool
 		writeErr(w, http.StatusNotFound, err)
 		return nil, false
 	}
+	// Scope ref READS to the caller: public refs + the caller's own private
+	// refs (private branches / drafts). Another user's private ref is invisible.
+	if _, u, ok := s.currentUser(r); ok && u != nil {
+		repo = repo.WithViewer(u.ID)
+	} else {
+		repo = repo.WithViewer(0)
+	}
 	return repo, true
 }
 

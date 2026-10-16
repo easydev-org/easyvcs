@@ -147,13 +147,19 @@ export class Api {
   // Line diff between two refs (unified per-file content).
   diff = (ns: string, base: string, head: string) =>
     this.req<{ files: RRDiff[] }>(`/api/v1/namespaces/${ns}/diff?` + new URLSearchParams({ base, head }))
-  // Write a file (create/update/delete) on a NON-protected branch via /commit.
-  commitFiles = (
+  // Write a file op set to the caller's PRIVATE draft branch (/draft). There is
+  // NO public /commit: all public changes go through a merged Revision Request.
+  draftFiles = (
     ns: string,
-    body: { branch: string; message: string; files: { path: string; operation: string; content?: string }[] },
+    body: {
+      branch: string
+      message: string
+      revision_id?: string
+      files: { path: string; operation: string; content?: string }[]
+    },
   ) =>
-    this.req<{ ok: boolean; branch: string; revision_id: string; snapshot: string }>(
-      `/api/v1/namespaces/${ns}/commit`,
+    this.req<{ ok: boolean; branch: string; revision_id: string; snapshot: string; private?: boolean }>(
+      `/api/v1/namespaces/${ns}/draft`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     )
   createBranch = (ns: string, name: string, from: string) =>

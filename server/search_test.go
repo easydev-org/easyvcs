@@ -10,7 +10,7 @@ import (
 func TestSearchNameAndContent(t *testing.T) {
 	_, mux, token, _ := hostingTestServer(t)
 	// The fixture repo has a file; add a known one.
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 		"branch": "searchbr", "message": "seed",
 		"files": []map[string]any{
 			{"path": "pkg/util.go", "operation": "create", "content": "package pkg\n\n// Add returns a+b.\nfunc Add(a, b int) int { return a + b }\n"},
@@ -19,7 +19,7 @@ func TestSearchNameAndContent(t *testing.T) {
 		if r2 := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/branches", token, map[string]any{"name": "searchbr", "from": "main"}); r2.Code != 200 {
 			t.Fatalf("branch: %d", r2.Code)
 		}
-		if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+		if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 			"branch": "searchbr", "message": "seed",
 			"files": []map[string]any{{"path": "pkg/util.go", "operation": "create", "content": "package pkg\n\n// Add returns a+b.\nfunc Add(a, b int) int { return a + b }\n"}},
 		}); rec.Code != 200 {

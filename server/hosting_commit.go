@@ -353,3 +353,185 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "revision_id": rev.ID, "snapshot": snap.RevisionHash.String(),
 	})
 }
+
+// ---- draft (private, no working copy): a jj-style working-copy revision ----
+
+// draftReq is the /draft request body: a set of file ops applied to the caller's
+// PRIVATE draft revision on a PRIVATE branch. No revision_id => create a NEW
+// draft; with revision_id => amend the caller's own draft. The draft branch and
+// revision are visible ONLY to the caller until they open a Revision Request.
+type draftReq struct {
+	Branch     string             `json:"branch"`
+	Message    string             `json:"message"`
+	RevisionID string             `json:"revision_id"`
+	Author     *store.Author      `json:"author"`
+	Parents    []string           `json:"parents"`
+	Files      []syncproto.FileOp `json:"files"`
+}
+
+// handleDraft applies a set of file operations to the caller's PRIVATE draft
+// branch (creating it if needed) as a PRIVATE revision. This REPLACES /commit:
+// there is no way to write a PUBLIC branch directly — all public changes go
+// through a merged Revision Request. A draft is the caller's private scratch.
+func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	if repo.IsMirror() {
+		writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: %s is a read-only mirror", repo))
+		return
+	}
+	_, u, ok := s.currentUser(r)
+	if !ok || u == nil {
+		writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: a token is required to draft"))
+		return
+	}
+	req, err := decodeJSONBody[draftReq](r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Branch = strings.TrimSpace(req.Branch)
+	if req.Branch == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("branch is required"))
+		return
+	}
+	if strings.TrimSpace(req.Message) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("message is required"))
+		return
+	}
+	if len(req.Files) == 0 && req.RevisionID == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("files must not be empty unless revision_id is given (reword)"))
+		return
+	}
+	changes, err := commitSpecs(req.Files)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	author := s.callerAuthor(tokenFrom(r.Context()))
+	if req.Author != nil {
+		author = *req.Author
+	}
+	ws := revision.NewWorkspace(repo.WithViewer(u.ID))
+	// Sub-scope lift: a ?path= draft lifts a (scope-relative) change onto the
+	// draft branch, touching only that subtree — same as the old /commit lift.
+	if scope := scopePath(r); scope != "" {
+		if req.RevisionID != "" {
+			writeErr(w, http.StatusBadRequest, errors.New("revision_id (amend) is not supported with path"))
+			return
+		}
+		var lrev *store.Revision
+		var lsnap *store.Snapshot
+		lerr := s.withRepoLock(repo, func() error {
+			ns, rv, e := ws.Lift(req.Branch, scope, changes, req.Message, author)
+			if e != nil {
+				return e
+			}
+			if err := repo.SetRevisionOwner(rv.ID, u.ID); err != nil {
+				return err
+			}
+			if e := repo.PutRef(&store.Ref{Name: req.Branch, Kind: store.RefBranch, Target: rv.ID, OwnerUserID: u.ID}); e != nil {
+				return e
+			}
+			lsnap, lrev = ns, rv
+			return nil
+		})
+		if lerr != nil {
+			writeErr(w, http.StatusBadRequest, lerr)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "branch": req.Branch, "path": scope, "revision_id": lrev.ID, "snapshot": lsnap.RevisionHash.String(), "private": true})
+		return
+	}
+	// Resolve the draft's BASE: the caller's private draft tip if present, else
+	// the PUBLIC branch tip of the same name (the draft starts from the shared
+	// branch, then diverges privately).
+	draftRef, derr := repo.GetRefIn("", req.Branch)
+	var draftTip string
+	if derr == nil && draftRef != nil && draftRef.OwnerUserID == u.ID {
+		draftTip = draftRef.Target
+	}
+	publicRef, perr := repo.GetRefIn("", req.Branch) // viewer-scoped: may return the private one
+	_ = publicRef
+	_ = perr
+	var rev *store.Revision
+	var snap *store.Snapshot
+	conflict := ""
+	err = s.withRepoLock(repo, func() error {
+		var baseHash object.ID
+		switch {
+		case req.RevisionID != "":
+			// Amend: only the caller's OWN draft revision may be amended.
+			old, oerr := ws.GetRevision(req.RevisionID)
+			if oerr != nil {
+				return fmt.Errorf("draft revision %q not found: %w", req.RevisionID, oerr)
+			}
+			if old.OwnerUserID != u.ID {
+				return fmt.Errorf("forbidden: revision %q is not your draft", req.RevisionID)
+			}
+			baseHash = old.Hash
+		case draftTip != "":
+			cur, gerr := tipSnapshotHash(repo, draftTip)
+			if gerr != nil {
+				return gerr
+			}
+			baseHash = cur
+		default:
+			// Start the draft from the PUBLIC branch of the same name if it
+			// exists, else from the default branch.
+			startName := req.Branch
+			if pub, gerr := repo.GetRefIn("", req.Branch); gerr == nil && pub != nil && pub.OwnerUserID == 0 {
+				startName = req.Branch
+			} else if mainRef, merr := repo.GetRefIn("", "main"); merr == nil && mainRef != nil {
+				_ = mainRef
+				startName = "main"
+			}
+			if r, gerr := repo.GetRefIn("", startName); gerr == nil && r != nil {
+				if cur, e := tipSnapshotHash(repo, r.Target); e == nil {
+					baseHash = cur
+				}
+			}
+		}
+		// Optimistic concurrency: a pinned parent must match the base tip.
+		if len(req.Parents) > 0 {
+			want, herr := object.HexToID(req.Parents[0])
+			if herr != nil {
+				return fmt.Errorf("bad parent sha %q: %w", req.Parents[0], herr)
+			}
+			if baseHash != (object.ID{}) && baseHash != want {
+				conflict = "branch moved since the pinned parent"
+				return nil
+			}
+		}
+		newSnap, newRev, cerr := ws.CommitFromChanges(baseHash, changes, req.Message, author, req.RevisionID)
+		if cerr != nil {
+			return cerr
+		}
+		// Stamp the revision PRIVATE to the caller (hidden from everyone else).
+		if err := repo.SetRevisionOwner(newRev.ID, u.ID); err != nil {
+			return err
+		}
+		newRev.OwnerUserID = u.ID
+		// Point the PRIVATE branch at it (owner = caller).
+		if serr := repo.PutRef(&store.Ref{Name: req.Branch, Kind: store.RefBranch, Target: newRev.ID, OwnerUserID: u.ID}); serr != nil {
+			return serr
+		}
+		snap, rev = newSnap, newRev
+		return nil
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if conflict != "" {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "stale", "message": conflict})
+		return
+	}
+	s.auditOK(r, tokenFrom(r.Context()), fmt.Sprintf("draft branch=%s rev=%s", req.Branch, rev.ID))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "branch": req.Branch, "revision_id": rev.ID, "snapshot": snap.RevisionHash.String(),
+		"private": true,
+	})
+}

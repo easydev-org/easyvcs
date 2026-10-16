@@ -6,20 +6,25 @@ import (
 	"testing"
 )
 
-// TestCommitToMissingBranchRefused is guard ①: a /commit naming a branch that
-// does not exist must be REFUSED (it used to silently create a root revision
-// whose tree contained only the request's files — the root-commit wipe).
-func TestCommitToMissingBranchRefused(t *testing.T) {
+// TestDraftStartsFromMainNotRoot pins the anti-wipe property for drafts: a draft
+// naming a branch that does not exist STARTS FROM MAIN (the shared base), NOT
+// from an empty root — so it can never wipe the shared files when later merged.
+func TestDraftStartsFromMainNotRoot(t *testing.T) {
 	_, mux, token, _ := hostingTestServer(t)
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 		"branch":  "does-not-exist",
 		"message": "sneaky root",
 		"files": []map[string]any{
 			{"path": "a.txt", "operation": "create", "content": "hello\n"},
 		},
 	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("commit to missing branch must be 400, got %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("draft on a new branch must start from main: %d %s", rec.Code, rec.Body.String())
+	}
+	// The draft branch must CONTAIN main's seeded README.md (it started from main).
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=does-not-exist", token, nil)
+	if !has(tr.Body.String(), "README.md") {
+		t.Fatalf("draft must start from main (README.md present): %s", tr.Body.String())
 	}
 }
 
@@ -27,7 +32,7 @@ func TestCommitToMissingBranchRefused(t *testing.T) {
 // `parents: []` still creates a root revision (import/bootstrap path).
 func TestCommitExplicitRootAllowed(t *testing.T) {
 	_, mux, token, _ := hostingTestServer(t)
-	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 		"branch":  "brand-new",
 		"message": "explicit root",
 		"parents": []string{},
@@ -107,7 +112,7 @@ func indexOf(s, sub string) int {
 func TestRRMergeAllowConflict(t *testing.T) {
 	_, mux, token, repo := hostingTestServer(t)
 	// Seed a file on main, then make a source that conflicts with a main advance.
-	seed := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+	seed := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 		"branch": "main", "message": "seed",
 		"files": []map[string]any{{"path": "f.txt", "operation": "create", "content": "base\n"}},
 	})
@@ -127,7 +132,7 @@ func TestRRMergeAllowConflict(t *testing.T) {
 	}
 	src := decode(t, snap)["snapshot"].(string)
 	// Advance topic on the SAME file -> conflict.
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 		"branch": "topic", "message": "advance",
 		"files": []map[string]any{{"path": "f.txt", "operation": "update", "content": "topic\n"}},
 	}); rec.Code != 200 {
@@ -161,7 +166,7 @@ func TestRRResolveByContent(t *testing.T) {
 	bin := func(s byte) string {
 		return base64.StdEncoding.EncodeToString([]byte{0x89, 'P', 'N', 'G', 0, 0, s, 0xff})
 	}
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 		"branch": "topic", "message": "seed",
 		"files": []map[string]any{{"path": "logo.png", "operation": "create", "content_bytes": bin(1)}},
 	}); rec.Code != 200 {
@@ -170,7 +175,7 @@ func TestRRResolveByContent(t *testing.T) {
 			map[string]any{"name": "topic", "from": "main"}); r2.Code != 200 {
 			t.Fatalf("branch: %d %s", r2.Code, r2.Body.String())
 		}
-		if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+		if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 			"branch": "topic", "message": "seed",
 			"files": []map[string]any{{"path": "logo.png", "operation": "create", "content_bytes": bin(1)}},
 		}); rec.Code != 200 {
@@ -181,7 +186,7 @@ func TestRRResolveByContent(t *testing.T) {
 		"message": "src", "files": []map[string]any{{"path": "logo.png", "operation": "update", "content_bytes": bin(2)}},
 	})
 	src := decode(t, snap)["snapshot"].(string)
-	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, map[string]any{
+	if rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, map[string]any{
 		"branch": "topic", "message": "advance",
 		"files": []map[string]any{{"path": "logo.png", "operation": "update", "content_bytes": bin(3)}},
 	}); rec.Code != 200 {

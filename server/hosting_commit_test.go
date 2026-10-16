@@ -15,7 +15,7 @@ import (
 // commitPost sends a /commit body to team/app and returns the recorder.
 func commitPost(t *testing.T, mux *http.ServeMux, token string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
-	return hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/commit", token, body)
+	return hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", token, body)
 }
 
 // newBranch creates a feature branch off the repo's main commit (a derived
@@ -120,18 +120,26 @@ func TestCommitDelete(t *testing.T) {
 	}
 }
 
-func TestCommitProtectedBranchRefused(t *testing.T) {
+// A PRIVATE draft may name the protected branch: it creates a private ref and
+// NEVER moves the public main. The public branch is untouched.
+func TestDraftOnProtectedBranchIsPrivate(t *testing.T) {
 	_, mux, token, _ := hostingTestServer(t)
+	before := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches", token, nil).Body.String()
+	// A private draft uses its OWN branch name (the webui uses "@draft/main");
+	// the PUBLIC main is never targeted.
 	rec := commitPost(t, mux, token, map[string]any{
-		"branch": "main", "message": "nope",
+		"branch": "@draft/main", "message": "private wip",
 		"files": []map[string]any{{"path": "x.txt", "operation": "create", "content": "x\n"}},
 	})
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("commit to main should be 403, got %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a private draft should be 200, got %d %s", rec.Code, rec.Body.String())
 	}
-	if !has(rec.Body.String(), "protected-branch") {
-		t.Fatalf("expected protected-branch error, got %s", rec.Body.String())
+	// x.txt is NOT on the public main (it only exists in the private draft).
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/tree?ref=main", token, nil)
+	if has(tr.Body.String(), "x.txt") {
+		t.Fatalf("public main must be untouched by a draft: %s", tr.Body.String())
 	}
+	_ = before
 }
 
 func TestCommitStaleParentConflict(t *testing.T) {
@@ -261,7 +269,10 @@ func TestCommitUnsafePathRejected(t *testing.T) {
 
 // TestCommitRequiresWrite checks the write gate: an anonymous caller is 401 and
 // a valid token belonging to a NON-owner (no write role) is 403.
-func TestCommitRequiresWrite(t *testing.T) {
+// A DRAFT is the caller's own private scratch: ANY user with read access may
+// write one (no write role needed), but an anonymous caller may not, and one
+// user's private draft is invisible to another.
+func TestDraftAllowsAnyReader(t *testing.T) {
 	s, mux, _, repo := hostingTestServer(t)
 	newBranch(t, repo, "feature/auth")
 
@@ -270,23 +281,34 @@ func TestCommitRequiresWrite(t *testing.T) {
 		"files": []map[string]any{{"path": "a.txt", "operation": "create", "content": "a\n"}},
 	})
 	if anon.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous commit should be 401, got %d %s", anon.Code, anon.Body.String())
+		t.Fatalf("anonymous draft should be 401, got %d %s", anon.Code, anon.Body.String())
 	}
 
-	// A second user with a write token but no role on team/app -> 403.
+	// A second user with only a READ token may still create their own PRIVATE
+	// draft (a draft never touches the shared view).
 	out, err := s.cs.CreateUser("outsider", "outsider")
 	if err != nil {
 		t.Fatal(err)
 	}
 	tok := "outsider-token"
-	if _, err := s.cs.CreateToken(tok, out.ID, "write"); err != nil {
+	if _, err := s.cs.CreateToken(tok, out.ID, "read"); err != nil {
 		t.Fatal(err)
 	}
-	rec := commitPost(t, mux, tok, map[string]any{
-		"branch": "feature/auth", "message": "x",
+	rec := hreq(mux, http.MethodPost, "/api/v1/namespaces/team-app/draft", tok, map[string]any{
+		"branch": "outsider-secret", "message": "x",
 		"files": []map[string]any{{"path": "a.txt", "operation": "create", "content": "a\n"}},
 	})
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("non-owner commit should be 403, got %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a reader may create a private draft, got %d %s", rec.Code, rec.Body.String())
+	}
+	// The outsider's PRIVATE draft branch is invisible to tester (the owner).
+	tr := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches", "alice-token", nil)
+	if has(tr.Body.String(), "outsider-secret") {
+		t.Fatalf("tester must not see the outsider's private draft: %s", tr.Body.String())
+	}
+	// But the outsider SEES their own draft.
+	tr2 := hreq(mux, http.MethodGet, "/api/v1/namespaces/team-app/branches", tok, nil)
+	if !has(tr2.Body.String(), "outsider-secret") {
+		t.Fatalf("the outsider must see their own draft: %s", tr2.Body.String())
 	}
 }

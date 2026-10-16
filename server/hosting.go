@@ -105,8 +105,11 @@ func (s *Server) mountHosting(mux *http.ServeMux) {
 	// M3c branch sync: integrate a base branch into a feature branch.
 	mux.HandleFunc("POST /api/v1/namespaces/{ns}/branches/{branch}/sync", s.requireRepoAccess(true, s.handleBranchSync))
 
-	// M3b commit (no working copy): apply a file-op set to a non-default branch.
-	mux.HandleFunc("POST /api/v1/namespaces/{ns}/commit", s.requireRepoAccess(true, s.handleCommitFiles))
+	// M3b draft (no working copy): apply a file-op set to the caller's PRIVATE
+	// draft branch as a PRIVATE revision. READ access is enough: a draft is the
+	// caller's own scratch and NEVER touches the shared view. There is NO public
+	// /commit — all public changes go through a merged Revision Request.
+	mux.HandleFunc("POST /api/v1/namespaces/{ns}/draft", s.requireRepoAccess(false, s.handleDraft))
 	// M3b snapshot (no working copy): build a revision + snapshot, move NO ref.
 	// PROPOSE level (developer+): the "propose from a sandbox" primitive feeding
 	// POST /rr {source_snapshot}.

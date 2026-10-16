@@ -130,6 +130,9 @@ type Revision struct {
 	// ForkFrom records the revision id this revision was forked from, if any.
 	// Used by workspace auto-fork so the origin is traceable.
 	ForkFrom string
+	// OwnerUserID marks a PRIVATE revision (a draft): 0 = public, non-zero =
+	// visible ONLY to that user until it is proposed as an RR source.
+	OwnerUserID int64
 	// ChangedPaths lists the repo-relative paths whose content changed in this
 	// revision relative to its parent (or all paths for the root revision). It
 	// is used to cheaply answer "which revisions modified a given file" by
@@ -156,6 +159,9 @@ type Ref struct {
 	// visible only within that path; a root ref projects down to every
 	// sub-scope that contains it.
 	Path string
+	// OwnerUserID is the private owner of this ref: 0 = PUBLIC (visible to
+	// everyone with read access); non-zero = PRIVATE, visible ONLY to that user.
+	OwnerUserID int64
 }
 
 // RepoStore is the repo-scoped persistence boundary used by the semantic layer.
@@ -224,4 +230,18 @@ type Repo struct {
 	namespaceID int64
 	OwnerUserID int64
 	Name        string
+	// viewerUserID scopes ref READS to what this user may see: PUBLIC refs
+	// (owner 0) plus their OWN private refs. 0 = anonymous (public only).
+	viewerUserID int64
 }
+
+// WithViewer returns a copy of the handle that reads refs as `userID` (public
+// refs + that user's private refs). 0 = anonymous (public only).
+func (r *Repo) WithViewer(userID int64) *Repo {
+	cp := *r
+	cp.viewerUserID = userID
+	return &cp
+}
+
+// Viewer returns the viewer user id (0 = anonymous).
+func (r *Repo) Viewer() int64 { return r.viewerUserID }

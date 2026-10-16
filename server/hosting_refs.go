@@ -79,6 +79,10 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeJSONBody[struct {
 		Name string `json:"name"`
 		From string `json:"from"`
+		// Public requests a PUBLIC branch (visible to everyone). Default false:
+		// the branch is PRIVATE to the caller (visible only to them), which ANY
+		// user with read access may create.
+		Public bool `json:"public"`
 	}](r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -88,12 +92,36 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
-	// The SCOPE is always the ?path= query (docs/subrepo-scopes.md): one
-	// concept, one place.
+	// A PUBLIC branch changes the shared view, so it is restricted to a writer
+	// (owner/maintainer). A PRIVATE branch is the caller's own scratch and is
+	// allowed for anyone with read access.
+	_, u, ok := s.currentUser(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: a token is required"))
+		return
+	}
+	var owner int64
+	if req.Public {
+		if u == nil {
+			writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: a token is required"))
+			return
+		}
+		if role, rerr := s.cs.RoleOf(repo.NamespaceID(), u.ID); rerr != nil || !role.CanPush() {
+			writeErr(w, http.StatusForbidden, errors.New("forbidden: a public branch requires write access"))
+			return
+		}
+	} else {
+		if u == nil {
+			writeErr(w, http.StatusUnauthorized, errors.New("unauthorized: a token is required for a private branch"))
+			return
+		}
+		owner = u.ID
+	}
+	// The SCOPE is always the ?path= query (docs/subrepo-scopes.md).
 	path := scopePath(r)
-	ws := revision.NewWorkspace(repo)
-	// Idempotent: an existing branch (in this scope) is returned unchanged.
-	if cur, err := ws.GetRefIn(path, req.Name); err == nil && cur != nil && cur.Kind == store.RefBranch {
+	ws := revision.NewWorkspace(repo.WithViewer(owner))
+	// Idempotent: an existing branch (in this scope, for this owner) is returned.
+	if cur, err := ws.GetRefIn(path, req.Name); err == nil && cur != nil && cur.Kind == store.RefBranch && cur.OwnerUserID == owner {
 		writeJSON(w, http.StatusOK, refView(cur))
 		return
 	}
@@ -109,11 +137,18 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	ref, err := ws.SetRefIn(path, req.Name, store.RefBranch, ch.ID)
-	if err != nil {
+	// A PRIVATE branch's derived revision is private too (hidden from others).
+	if owner != 0 {
+		if err := repo.SetRevisionOwner(ch.ID, owner); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if err := repo.PutRef(&store.Ref{Name: req.Name, Kind: store.RefBranch, Target: ch.ID, Path: path, OwnerUserID: owner}); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	ref, _ := ws.GetRefIn(path, req.Name)
 	s.advCache.invalidate(repo.NamespaceID())
 	writeJSON(w, http.StatusOK, refView(ref))
 }

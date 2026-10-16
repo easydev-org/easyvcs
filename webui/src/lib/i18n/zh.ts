@@ -63,6 +63,7 @@ export const zh: Dict = {
     drafted: '已保存到草稿',
     commit: '提交',
     commitHint: '将草稿正式提交为一个版本；之后的编辑会开始新的草稿。',
+    rrOpened: '已创建合并请求 #{iid}',
     committed: '已提交',
     draftHint: '保存到草稿版本（稍后正式提交）',
     saveToDraft: '保存到草稿',

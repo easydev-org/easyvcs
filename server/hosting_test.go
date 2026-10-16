@@ -43,7 +43,9 @@ func hostingTestServer(t *testing.T) (*Server, *http.ServeMux, string, *store.Re
 		t.Fatal(err)
 	}
 	_ = snap
-	return s, s.Router(), "alice-token", repo
+	// Return a handle SCOPED to "tester": a private draft/branch is visible only
+	// to its owner, so tests that read refs/revisions must view as the owner.
+	return s, s.Router(), "alice-token", repo.WithViewer(u.ID)
 }
 
 // hreq performs an HTTP request against mux with an optional bearer token.
