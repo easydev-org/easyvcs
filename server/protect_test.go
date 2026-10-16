@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/easylab-platform/easyvcs/object"
-	"github.com/easylab-platform/easyvcs/revision"
 	"github.com/easylab-platform/easyvcs/store"
 	"github.com/easylab-platform/easyvcs/transfer"
 )
@@ -84,54 +82,32 @@ func TestProtectedBranchesDefaultMain(t *testing.T) {
 
 // A push that MOVES a protected branch is refused (fast-forward and
 // non-fast-forward alike), while a push to an unprotected branch succeeds.
-func TestPushProtectedBranchRefused(t *testing.T) {
+// A push may only create/move the caller's OWN PRIVATE branch. Moving ANY
+// public branch (main included) is refused: public change is RR-only.
+func TestPushPublicBranchRefused(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
-	// Re-enable protection on main (seedRepo disabled it for the push fixtures).
 	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
-	if err := repo.SetProtectedBranches([]string{"main"}); err != nil {
-		t.Fatal(err)
-	}
-	child, root := childAndRoot(t, repo)
+	child, _ := childAndRoot(t, repo)
 
-	// Fast-forward main -> child: refused with a clear message.
+	// Fast-forward main -> child: refused (main is PUBLIC).
 	rec := push(t, s, branchBundle(t, repo, "main", child))
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("push moving protected main should be 403, got %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("push moving public main should be 403, got %d %s", rec.Code, rec.Body.String())
 	}
 	var resp map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if resp["error"] != "protected-branch" {
-		t.Fatalf("expected error=protected-branch, got %v", resp["error"])
+	if resp["error"] != "public-branch-rr-only" {
+		t.Fatalf("expected error=public-branch-rr-only, got %v", resp["error"])
 	}
 	if msg, _ := resp["message"].(string); msg == "" || !strings.Contains(msg, "Revision Request") {
 		t.Fatalf("message should mention Revision Request, got %q", msg)
 	}
 
-	// A genuinely non-fast-forward move of main: a divergent revision with NO
-	// ancestry to the current tip. main -> divergent must also be 403 (the
-	// protection check runs before the fast-forward check).
-	ws0 := revision.NewWorkspace(repo)
-	_, divRev, err := ws0.CommitFromChanges(object.ID{},
-		[]revision.FileChangeSpec{{Path: "div.txt", Content: []byte("divergent\n")}},
-		"divergent", store.Author{Name: "t"}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec = push(t, s, branchBundle(t, repo, "main", divRev.ID))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("non-ff push to protected main should be 403, got %d %s", rec.Code, rec.Body.String())
-	}
-
-	// A push to an UNPROTECTED branch succeeds. Create a branch ref at the root
-	// and push it forward to the child (fast-forward).
-	ws := revision.NewWorkspace(repo)
-	if _, err := ws.SetRef("feature", store.RefBranch, root); err != nil {
-		t.Fatal(err)
-	}
-	rec = push(t, s, branchBundle(t, repo, "feature", child))
+	// Pushing a NEW branch name succeeds: it is created PRIVATE to the caller.
+	rec = push(t, s, branchBundle(t, repo, "myprivate", child))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("push to unprotected feature should be 200, got %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("push creating a private branch should be 200, got %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -152,29 +128,25 @@ func TestPushProtectedBranchNoOpAllowed(t *testing.T) {
 
 // Changing the protected set retargets the rule: with ["release/x"], main is
 // pushable and release/x is not.
-func TestProtectedBranchesAreConfigurable(t *testing.T) {
+// Regardless of the protected set, a PUBLIC branch may not be pushed (RR-only);
+// a push may still CREATE a new private branch.
+func TestPushPublicBranchesAreRROnly(t *testing.T) {
 	s := newTestServer(t, "secret")
 	seedRepo(t, s)
 	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
-	if err := repo.SetProtectedBranches([]string{"release/x"}); err != nil {
+	// Even with NO protected branches, main is public -> RR-only.
+	if err := repo.SetProtectedBranches([]string{}); err != nil {
 		t.Fatal(err)
 	}
-	child, root := childAndRoot(t, repo)
-
-	// main is no longer protected -> a fast-forward push is allowed.
+	child, _ := childAndRoot(t, repo)
 	rec := push(t, s, branchBundle(t, repo, "main", child))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("main should be pushable when not protected, got %d %s", rec.Code, rec.Body.String())
-	}
-
-	// release/x IS protected -> refused.
-	ws := revision.NewWorkspace(repo)
-	if _, err := ws.SetRef("release/x", store.RefBranch, root); err != nil {
-		t.Fatal(err)
-	}
-	rec = push(t, s, branchBundle(t, repo, "release/x", child))
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("push to protected release/x should be 403, got %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("main (public) should be RR-only, got %d %s", rec.Code, rec.Body.String())
+	}
+	// A brand-new branch name is created PRIVATE and allowed.
+	rec = push(t, s, branchBundle(t, repo, "draft-a", child))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("push creating a private branch should be 200, got %d %s", rec.Code, rec.Body.String())
 	}
 }
 

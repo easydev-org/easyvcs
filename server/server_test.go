@@ -136,7 +136,7 @@ func TestPushDisallowsNonFastForward(t *testing.T) {
 	}
 
 	fwd := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
-		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: childID}}}
+		Revisions: revs, Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: childID}}}
 	payload, _ := transfer.CompressBundle(fwd)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
@@ -148,7 +148,7 @@ func TestPushDisallowsNonFastForward(t *testing.T) {
 	}
 
 	back := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
-		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: rootID}}}
+		Revisions: revs, Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: rootID}}}
 	payload2, _ := transfer.CompressBundle(back)
 	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload2))
 	req2.Header.Set("Content-Encoding", "gzip")
@@ -167,7 +167,7 @@ func TestPushFastForwardAllowed(t *testing.T) {
 	revs, _ := repo.ListRevisions()
 	mainRef, _ := repo.GetRef("main")
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
-		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: mainRef.Target}}}
+		Revisions: revs, Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: mainRef.Target}}}
 	payload, _ := transfer.CompressBundle(b)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
@@ -188,7 +188,7 @@ func TestPushAuthRequired(t *testing.T) {
 
 	send := func(auth string) int {
 		b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
-			Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: mainRef.Target}}}
+			Revisions: revs, Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: mainRef.Target}}}
 		payload, _ := transfer.CompressBundle(b)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 		req.Header.Set("Content-Encoding", "gzip")
@@ -252,7 +252,7 @@ func TestEndToEndMockPushFetch(t *testing.T) {
 		t.Fatalf("no child revision to push")
 	}
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
-		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: childID}}}
+		Revisions: revs, Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: childID}}}
 	payload, _ := transfer.CompressBundle(b)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
@@ -263,10 +263,12 @@ func TestEndToEndMockPushFetch(t *testing.T) {
 		t.Fatalf("push through mock server should be 200, got %d %s", rec.Code, rec.Body.String())
 	}
 
-	// Fetch a bundle and confirm it carries the pushed revision + ref.
+	// Fetch a bundle and confirm it carries the pushed revision + ref. The
+	// pushed ref is PRIVATE to the caller, so fetch as that user.
 	fetchReq := []byte(`{}`)
 	frec := httptest.NewRecorder()
 	freq := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/fetch", bytes.NewReader(fetchReq))
+	freq.Header.Set("Authorization", "Bearer secret")
 	s.Router().ServeHTTP(frec, freq)
 	if frec.Code != http.StatusOK {
 		t.Fatalf("fetch: %d %s", frec.Code, frec.Body.String())
@@ -294,7 +296,7 @@ func TestACLDeniesNonMemberWrite(t *testing.T) {
 
 	// "secret" user IS a "team" member (from newTestServer), so this is allowed.
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(),
-		Revisions: revs, Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: mainRef.Target}}}
+		Revisions: revs, Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: mainRef.Target}}}
 	payload, _ := transfer.CompressBundle(b)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")

@@ -73,7 +73,7 @@ Network (own smart protocol):
   remote                    list remotes
   fetch <remote> [ref...]   fetch all (or given) remote branchs into origin/*
   pull <remote> [branch]  fetch + merge a remote branch into local (default branch)
-  push <remote>             push changes to an EasyVCS server
+  push <remote>             push to YOUR OWN private branch (public change -> request)
 
 Git interop (no smart protocol, full + minimal-diff commit):
   git-pull <git-url>        fetch a git repo as one local revision

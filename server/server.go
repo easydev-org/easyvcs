@@ -494,35 +494,52 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	var protectedViolation []string
 	var conflicts []*store.Ref
 	var n int
+	// The caller's user id: a push may only create/move PRIVATE branches (owned
+	// by the caller). A PUBLIC branch may NOT be changed by a push — all public
+	// changes go through a merged Revision Request. This makes the CLI push
+	// consistent with the draft+RR model.
+	callerID := int64(0)
+	if tk != nil {
+		callerID = tk.UserID
+	}
 	err = s.withRepoLock(repo, func() error {
 		serverRefs, err := repo.ListRefs()
 		if err != nil {
 			return err
 		}
-		protected, err := repo.ProtectedBranches()
-		if err != nil {
-			return err
+		cur := make(map[string]string, len(serverRefs))
+		for _, rf := range serverRefs {
+			cur[rf.Name] = rf.Target
 		}
-		if len(protected) > 0 {
-			cur := make(map[string]string, len(serverRefs))
-			for _, rf := range serverRefs {
-				cur[rf.Name] = rf.Target
+		for _, inc := range b.Refs {
+			if inc.Kind != store.RefBranch {
+				continue
 			}
-			for _, inc := range b.Refs {
-				if inc.Kind != store.RefBranch {
-					continue
-				}
-				if !isProtectedBranch(protected, inc.Name) {
-					continue
-				}
-				if cur[inc.Name] == inc.Target {
-					continue // no-op: the ref does not move
-				}
-				protectedViolation = append(protectedViolation, inc.Name)
+			if cur[inc.Name] == inc.Target {
+				continue // no-op: the ref does not move
 			}
-			if len(protectedViolation) > 0 {
-				return nil
+			// A push may only CREATE a new branch or move a branch that is
+			// PRIVATE and owned by the caller. Moving a PUBLIC branch (owner 0)
+			// — protected or not — is refused: public change is RR-only.
+			existing, gerr := repo.GetRef(inc.Name)
+			if gerr == nil && existing != nil {
+				// The branch exists: it must be the caller's own private branch.
+				if callerID == 0 || existing.OwnerUserID != callerID {
+					protectedViolation = append(protectedViolation, inc.Name)
+				}
 			}
+			// A non-existent branch is CREATED private to the caller (allowed).
+		}
+		if len(protectedViolation) > 0 {
+			return nil
+		}
+		// Rewrite every pushed ref as PRIVATE to the caller.
+		for _, r := range b.Refs {
+			r.OwnerUserID = callerID
+		}
+		// Every pushed revision becomes PRIVATE to the caller too.
+		for _, ch := range b.Revisions {
+			ch.OwnerUserID = callerID
 		}
 		conflicts = transfer.CheckNonFastForward(repo, serverRefs, b.Refs, b)
 		if len(conflicts) > 0 {
@@ -536,11 +553,11 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(protectedViolation) > 0 {
-		s.auditDenied(r, tk, "protected branch push: "+strings.Join(protectedViolation, ","))
+		s.auditDenied(r, tk, "public branch push: "+strings.Join(protectedViolation, ","))
 		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error":              "protected-branch",
-			"protected_branches": protectedViolation,
-			"message":            "protected branch(es) can only change through a merged Revision Request: " + strings.Join(protectedViolation, ", "),
+			"error":    "public-branch-rr-only",
+			"branches": protectedViolation,
+			"message":  "a push may only update YOUR OWN private branch; public branches change only through a merged Revision Request: " + strings.Join(protectedViolation, ", "),
 		})
 		return
 	}

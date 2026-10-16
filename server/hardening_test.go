@@ -66,9 +66,13 @@ func TestPushToEmptyServerNoDanglingRefs(t *testing.T) {
 	}
 
 	// Every ref target must resolve to a stored revision (no dangling refs).
+	// Pushed refs are PRIVATE to the caller, so view them as that user.
 	dst, err := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if u, uerr := s.cs.GetUserByUsername("tester"); uerr == nil {
+		dst = dst.WithViewer(u.ID)
 	}
 	refs, err := dst.ListRefs()
 	if err != nil {
@@ -198,7 +202,7 @@ func TestNonOwnerPushDenied(t *testing.T) {
 	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	revs, _ := repo.ListRevisions()
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
-		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: revs[0].ID}}}
+		Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: revs[0].ID}}}
 	payload, _ := transfer.CompressBundle(b)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
@@ -218,7 +222,7 @@ func TestOwnerCanPush(t *testing.T) {
 	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	revs, _ := repo.ListRevisions()
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
-		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: revs[0].ID}}}
+		Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: revs[0].ID}}}
 	payload, _ := transfer.CompressBundle(b)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
@@ -244,7 +248,7 @@ func TestReadLevelTokenStillPushesAsOwner(t *testing.T) {
 	repo, _ := s.cs.OpenRepo(store.NSRef{Name: "team-app"})
 	revs, _ := repo.ListRevisions()
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
-		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: revs[0].ID}}}
+		Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: revs[0].ID}}}
 	payload, _ := transfer.CompressBundle(b)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
@@ -270,7 +274,7 @@ func TestMirrorRepoRejectsPush(t *testing.T) {
 	}
 	revs, _ := repo.ListRevisions()
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
-		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: revs[0].ID}}}
+		Refs: []*store.Ref{{Name: "mydraft", Kind: store.RefBranch, Target: revs[0].ID}}}
 	payload, _ := transfer.CompressBundle(b)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/team-app/push", bytes.NewReader(payload))
 	req.Header.Set("Content-Encoding", "gzip")
@@ -317,8 +321,10 @@ func TestConcurrentPushOneFastForward(t *testing.T) {
 			childID = r.ID
 		}
 	}
+	// Push a PRIVATE branch (created by the push, owned by the caller): a public
+	// branch would be RR-only.
 	b := &transfer.Bundle{Version: transfer.Version, Repo: repo.NSRef(), Revisions: revs,
-		Refs: []*store.Ref{{Name: "main", Kind: store.RefBranch, Target: childID}}}
+		Refs: []*store.Ref{{Name: "concurrent-draft", Kind: store.RefBranch, Target: childID}}}
 	payload, _ := transfer.CompressBundle(b)
 
 	var wg sync.WaitGroup
@@ -341,8 +347,12 @@ func TestConcurrentPushOneFastForward(t *testing.T) {
 			t.Fatalf("identical concurrent push %d should be idempotent-200, got %d", i, c)
 		}
 	}
-	// Ref still resolves after the storm.
-	final, err := repo.GetRef("main")
+	// Ref still resolves after the storm (viewed as its owner).
+	ownerRepo := repo
+	if u, uerr := s.cs.GetUserByUsername("tester"); uerr == nil {
+		ownerRepo = repo.WithViewer(u.ID)
+	}
+	final, err := ownerRepo.GetRef("concurrent-draft")
 	if err != nil {
 		t.Fatal(err)
 	}
