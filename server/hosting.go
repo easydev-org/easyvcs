@@ -206,6 +206,18 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 // (nil, true) for an anonymous request, and (nil, false) for an invalid or
 // disabled credential.
 func (s *Server) currentUser(r *http.Request) (*store.Token, *store.User, bool) {
+	// A host-installed resolver wins: it already authenticated the caller and
+	// resolved their identity, so we do not re-look-up the token. We still read
+	// the store user for its metadata (name/disabled), but a resolver that only
+	// knows a user id is enough.
+	if id, ok := identityOf(r); ok && id.UserID != 0 {
+		u, err := s.cs.GetUser(id.UserID)
+		if err != nil || (u != nil && u.Disabled) {
+			return nil, nil, false
+		}
+		// Synthesize a token so downstream code (viewer scoping, author) works.
+		return &store.Token{UserID: id.UserID, Level: "write"}, u, true
+	}
 	raw := bearerToken(r)
 	if raw == "" {
 		return nil, nil, true

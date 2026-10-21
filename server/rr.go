@@ -58,6 +58,7 @@ func (s *Server) callerAuthor(tk *store.Token) store.Author {
 func (s *Server) requirePropose(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
+		r = s.stashIdentity(r)
 		tk, ok := s.authenticate(r)
 		if !ok {
 			s.auditDenied(r, nil, "bad token")
@@ -71,7 +72,7 @@ func (s *Server) requirePropose(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		rref := store.NSRef{Name: nsRefName(r)}
-		if !s.canPropose(rref, tk) {
+		if !s.canProposeReq(r, rref, tk) {
 			s.auditDenied(r, tk, "no propose access")
 			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no propose access to %s", rref))
 			return
@@ -87,6 +88,7 @@ func (s *Server) requirePropose(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) requireMaintain(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
+		r = s.stashIdentity(r)
 		tk, ok := s.authenticate(r)
 		if !ok {
 			s.auditDenied(r, nil, "bad token")
@@ -102,7 +104,7 @@ func (s *Server) requireMaintain(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		rref := store.NSRef{Name: nsRefName(r)}
-		if !s.canMerge(rref, tk) {
+		if !s.canMergeReq(r, rref, tk) {
 			s.auditDenied(r, tk, "no maintain access")
 			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no maintain access to %s", rref))
 			return
@@ -114,6 +116,7 @@ func (s *Server) requireMaintain(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) requireMerge(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
+		r = s.stashIdentity(r)
 		tk, ok := s.authenticate(r)
 		if !ok {
 			s.auditDenied(r, nil, "bad token")
@@ -121,7 +124,7 @@ func (s *Server) requireMerge(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		rref := store.NSRef{Name: nsRefName(r)}
-		if !s.canMerge(rref, tk) {
+		if !s.canMergeReq(r, rref, tk) {
 			s.auditDenied(r, tk, "no merge access")
 			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no merge access to %s", rref))
 			return

@@ -69,6 +69,9 @@ type Server struct {
 	repoLocks repoLocker
 	// maxBody bounds request bodies (http.MaxBytesReader); 0 uses the default.
 	maxBody int64
+	// identity is an OPTIONAL external identity resolver (see WithIdentity).
+	// nil = resolve from the bearer token + store ACL (the default).
+	identity IdentityResolver
 }
 
 // DefaultMaxBody is the default request body limit (512 MiB).
@@ -215,8 +218,8 @@ func userIDVal(tk *store.Token) int64 {
 // readable even anonymously; a private repo requires a role (owner / member) or
 // an open instance (no users at all) for dev/CLI.
 func (s *Server) canRead(rref store.NSRef, tk *store.Token) bool {
-	role, err := s.cs.RoleOfRef(rref, userIDVal(tk))
-	if err == nil && role.CanRead() {
+	role := s.csRole1(rref, tk)
+	if role.CanRead() {
 		return true
 	}
 	return tk == nil && s.cs.IsOpenInstance()
@@ -227,11 +230,21 @@ func (s *Server) canRead(rref store.NSRef, tk *store.Token) bool {
 // authenticated-or-anonymous writer is permitted for dev ergonomics — but the
 // production path is owner-only.
 func (s *Server) canPush(rref store.NSRef, tk *store.Token) bool {
-	role, err := s.cs.RoleOfRef(rref, userIDVal(tk))
-	if err == nil && role.CanPush() {
+	role := s.csRole1(rref, tk)
+	if role.CanPush() {
 		return true
 	}
 	return s.cs.IsOpenInstance()
+}
+
+// csRole1 resolves the role for a request-less check (store ACL only). The
+// request-aware path is canReadReq / canPushReq in identity.go.
+func (s *Server) csRole1(rref store.NSRef, tk *store.Token) store.Role {
+	role, err := s.cs.RoleOfRef(rref, userIDVal(tk))
+	if err != nil {
+		return store.RoleNone
+	}
+	return role
 }
 
 // requireRepoAccess guards a handler with repository write (push) or read ACL.
@@ -243,6 +256,8 @@ func (s *Server) requireRepoAccess(write bool, next http.HandlerFunc) http.Handl
 		// Bound the request body to prevent unbounded memory use (413 on
 		// overrun; reads beyond the limit error out).
 		r.Body = http.MaxBytesReader(w, r.Body, s.maxBody)
+		// Resolve the host's identity decision ONCE (no-op when not installed).
+		r = s.stashIdentity(r)
 		tk, ok := s.authenticate(r)
 		if !ok {
 			s.auditDenied(r, nil, "bad token")
@@ -257,12 +272,12 @@ func (s *Server) requireRepoAccess(write bool, next http.HandlerFunc) http.Handl
 		}
 		rref := store.NSRef{Name: nsRefName(r)}
 		if write {
-			if !s.canPush(rref, tk) {
+			if !s.canPushReq(r, rref, tk) {
 				s.auditDenied(r, tk, "no write access")
 				writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no write access to %s", rref))
 				return
 			}
-		} else if !s.canRead(rref, tk) {
+		} else if !s.canReadReq(r, rref, tk) {
 			s.auditDenied(r, tk, "no read access")
 			// A private repo with no/invalid credential on the git smart-HTTP
 			// endpoints must be 401 (with WWW-Authenticate), NOT 403: git only
@@ -314,7 +329,7 @@ func (s *Server) requireRepoRead(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		if !s.canRead(rref, tk) {
+		if !s.canReadReq(r, rref, tk) {
 			s.auditDenied(r, tk, "no read access")
 			writeErr(w, http.StatusForbidden, fmt.Errorf("forbidden: no read access to %s", rref))
 			return
