@@ -2,14 +2,18 @@ name: ci
 
 # Check every push and pull request: vet, test, build.
 #
-# This repo had NO CI. That mattered more than usual here because the binary is
-# only produced when an image is built — a compile error sat in main until
-# someone tried to ship it.
+# THIS REPOSITORY IS A GO WORKSPACE. There is no root go.mod; go.work `use`s a
+# set of sub-directories, each with its own module. That layout is correct and is
+# not changed here: it lets the command reference the core library and every
+# adapter by path, without publishing intermediate versions to a proxy or
+# threading replace directives through thirty modules.
 #
-# CGO_ENABLED=0 is deliberate: the artifacts these repos produce run in
-# containers and in guests (Android's bionic, alpine's musl), so a dynamically
-# linked binary is a latent failure that only shows up where the interpreter is
-# missing.
+# So the toolchain is pinned from go.work, and every step runs at the workspace
+# root where ./... spans all modules.
+#
+# CGO_ENABLED=0 because the binaries run in containers and in guests (bionic,
+# musl), where a dynamically linked build fails with a missing interpreter rather
+# than an obvious error.
 
 on:
   push:
@@ -31,21 +35,16 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: go.work
           cache: true
+
+      - name: modules in this workspace
+        run: |
+          echo "$(grep -c '^\s*\./' go.work) modules"
+          go work edit -json | head -40
 
       - run: go vet ./...
 
       - run: go test ./...
 
-      # Build everything, not just one main: a package that no longer compiles is
-      # still a broken repository even if the entrypoint happens to build.
       - run: go build ./...
-
-      - name: assert the tree is tidy
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum || {
-            echo "::error::go.mod/go.sum are not tidy"
-            exit 1
-          }
