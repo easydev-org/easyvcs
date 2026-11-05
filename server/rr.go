@@ -202,6 +202,7 @@ func (s *Server) handleRRCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	s.emitRREvent("rr.opened", r, created, tk)
 	writeJSON(w, http.StatusOK, rrView(created))
 }
 
@@ -364,6 +365,7 @@ func (s *Server) handleRRUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	s.emitRREvent("rr.synced", r, updated, tk)
 	writeJSON(w, http.StatusOK, rrView(updated))
 }
 
@@ -539,6 +541,10 @@ func (s *Server) handleRRMerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditOK(r, tk, fmt.Sprintf("rr-merge iid=%d", iid))
+	// The merge is the event a deployment pipeline reacts to.
+	if merged, merr := s.cs.GetRevisionRequest(repo.NamespaceID(), iid); merr == nil {
+		s.emitRREvent("rr.merged", r, merged, tk)
+	}
 	out := map[string]any{
 		"ok":              true,
 		"clean":           res.Clean,
@@ -621,4 +627,29 @@ func rrViewDetail(x *store.RevisionRequest, reviews []*store.RRReview, comments 
 	out["comments"] = cm
 	out["merged_by"] = mergedBy
 	return out
+}
+
+// emitRREvent delivers a Revision Request transition to the webhook sink.
+//
+// A webhook is a NOTIFICATION, never a write path: a delivery problem must not
+// change the HTTP response.
+func (s *Server) emitRREvent(event string, r *http.Request, x *store.RevisionRequest, tk *store.Token) {
+	if s.webhook == nil || x == nil {
+		return
+	}
+	actor := ""
+	if tk != nil {
+		if u, err := s.cs.GetUser(tk.UserID); err == nil && u != nil {
+			actor = u.Username
+		}
+	}
+	s.emitWebhook(WebhookEvent{
+		Event:     event,
+		Namespace: nsRefName(r),
+		Ref:       x.TargetBranch,
+		RR:        x.IID,
+		Base:      x.BaseSnapshot,
+		Head:      x.SourceSnapshot,
+		Actor:     actor,
+	})
 }
