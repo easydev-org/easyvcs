@@ -150,6 +150,11 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	}
 	ref, _ := ws.GetRefIn(path, req.Name)
 	s.advCache.invalidate(repo.NamespaceID())
+	// A tag is the release trigger for a pipeline.
+	s.emitWebhook(WebhookEvent{
+		Event: "tag.created", Namespace: nsRefName(r), Tag: req.Name,
+		Ref: path, Head: ref.Target,
+	})
 	writeJSON(w, http.StatusOK, refView(ref))
 }
 
@@ -229,5 +234,10 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.advCache.invalidate(repo.NamespaceID())
+	// A tag is the release trigger for a pipeline.
+	s.emitWebhook(WebhookEvent{
+		Event: "tag.created", Namespace: nsRefName(r), Tag: req.Name,
+		Ref: path, Head: ref.Target,
+	})
 	writeJSON(w, http.StatusOK, refView(ref))
 }

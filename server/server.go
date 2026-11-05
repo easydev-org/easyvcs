@@ -72,6 +72,9 @@ type Server struct {
 	// identity is an OPTIONAL external identity resolver (see WithIdentity).
 	// nil = resolve from the bearer token + store ACL (the default).
 	identity IdentityResolver
+	// webhook, when set, receives change events (see webhook.go). nil = no
+	// delivery, which is the standalone default.
+	webhook WebhookSink
 }
 
 // DefaultMaxBody is the default request body limit (512 MiB).
